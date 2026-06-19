@@ -1,5 +1,3 @@
-local p = {}
-
 -- Generated/updated by test_runner.ps1. Crashing block -> true.
 block_wiki_bad_blocks = {
     ["XAR_APPLE_TREE_BRANCH_2_RED"] = true,
@@ -101,5 +99,3 @@ block_wiki_bad_blocks = {
     ["XAR_YW_GATEDCOM_LIB_8"] = true,
     ["XAR_YW_SLOW_EXIT_LANDMARK"] = true,
 }
-
-return p

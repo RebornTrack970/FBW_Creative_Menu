@@ -1,3 +1,8 @@
+local aspect = 1
+local std_aspect = 16/9
+
+-- important: width of ga_win_txt = len_txt*char_width
+
 local SEL_VAR  = "creative.selected_block"
 local MODE_VAR = "creative.build_mode"
 
@@ -28,10 +33,15 @@ local COLS, ROWS = 16, 8
 local CW, CH     = TILE_Y, TILE_Y + GAPY
 local PER_PAGE   = COLS * ROWS
 
-local function screen_aspect()
+-- makes the text size look the same as std_aspect for all aspect ratios
+local function fix_charw(charw)
+    return charw/aspect*std_aspect
+end
+
+local function screen_aspect() -- use variable instead
     local ok, a = pcall(ga_get_sys_f, "display.camera_params.a_ratio.value")
     if ok and type(a) == "number" and a > 0.1 then return a end
-    return 16 / 9
+    return std_aspect
 end
 
 local function compute_grid()
@@ -178,7 +188,15 @@ local function block_tex(raw)
     local cached = tex_cache[raw]
     if cached ~= nil then return cached end
     ensure_tex_set()
-    local found = fuzzy_tex(string.lower(clean_name(raw)), "block_", DROP_TOKENS)
+    local found
+    if raw:sub(1,6) == "block_" then
+        -- grab the texture from the module like a normal person
+        if _G[raw] and _G[raw].__get_tex then
+            found = _G[raw].__get_tex() -- returns "" if no texture.
+        end
+    else
+        found = fuzzy_tex(string.lower(clean_name(raw)), "block_", DROP_TOKENS)
+    end
     tex_cache[raw] = found
     return found
 end
@@ -243,22 +261,42 @@ end
 
 local bent_tex_cache = {}
 
+--local mesh_table = nil
+local function set(t) local o = {} for i,v in ipairs(t) do o[v] = true end return o end
+local invalid_meshes = set{"bent_ammo_gun_3_huge","bent_genesis_marker_long","bent_genesis_marker_short"}
+local function mesh_exists(mesh)
+    --if not mesh_table then
+
+    --end
+    if invalid_meshes[mesh] then return false end
+    return true
+end
+
 local function bent_tex(raw)
     local cached = bent_tex_cache[raw]
     if cached ~= nil then return cached end
     ensure_tex_set()
-    local stripped = raw
-    if string.sub(raw, 1, 5) == "bent_" then stripped = string.sub(raw, 6) end
-    local cands = {
-        raw,
-        stripped,
-        (string.gsub(stripped, "_once", "")),
-        "ent_" .. stripped,
-    }
     local found = ""
-    for _, cd in ipairs(cands) do
-        local m = (tex_set[cd] and cd) or ntex(cd)
-        if m then found = m; break end
+    if _G[raw] then
+        -- grab the texture and mesh like a normal person
+        local mesh = mesh_exists(raw) and raw or "" -- fbw uses mesh named the same as the bent implicitly
+        if _G[raw].__get_mesh then mesh = _G[raw].__get_mesh() end
+        if _G[raw].__on_render then mesh = "" end
+        if mesh ~= "" then found = ga_mesh_get_tex(mesh) end
+    end
+    if found == "" then
+        local stripped = raw
+        if string.sub(raw, 1, 5) == "bent_" then stripped = string.sub(raw, 6) end
+        local cands = {
+            raw,
+            stripped,
+            (string.gsub(stripped, "_once", "")),
+            "ent_" .. stripped,
+        }
+        for _, cd in ipairs(cands) do
+            local m = (tex_set[cd] and cd) or ntex(cd)
+            if m then found = m; break end
+        end
     end
     bent_tex_cache[raw] = found
     return found
@@ -320,7 +358,8 @@ local function small_btn(wid, cursor, x, y, w, h, label, active)
     local hov = btn_rect(cursor, x, y, w, h)
     local col = active and std.vec(0.50, 0.45, 0.18)
              or (hov and std.vec(0.34, 0.34, 0.50) or std.vec(0.18, 0.20, 0.28))
-    ga_win_quad_color(wid, x - 0.0015, y - 0.0015, x + w + 0.0015, y + h + 0.0015, std.vec(0.40, 0.40, 0.55))
+    local padding = 0.002
+    ga_win_quad_color(wid, x - fix_charw(padding), y - padding, x + w + fix_charw(padding), y + h + padding, std.vec(0.40, 0.40, 0.55))
     ga_win_quad_color(wid, x, y, x + w, y + h, col)
     ga_win_set_char_size(wid, 0.009, 0.018)
     ga_win_set_front_color(wid, std.vec(1, 1, 1))
@@ -737,6 +776,7 @@ local function wep_buttons_layout(cb_section, cb_button)
 end
 
 function p.init(wid)
+    aspect = ga_get_sys_f("display.camera_params.a_ratio.value")
     if inited then return end
     inited = true
     compute_grid()
@@ -754,7 +794,7 @@ function p.init(wid)
     ga_init_b(E_ALLY, false)
     ga_init_i(E_TTL, 0)
 
-    ga_win_widget_text_input_start(wid, 0.835, 0.012, 0.024)
+    ga_win_widget_text_input_start(wid, 0.835, fix_charw(0.012), 0.024)
     ga_win_widget_text_input_set_text(wid, "")
     ga_win_widget_text_input_set_enable_enter(wid, false)
 
@@ -766,7 +806,7 @@ function p.init(wid)
     ga_win_widget_button_start(wid, 6, 0.68,  0.91, 0.009, 0.018, "INTERACT")
     ga_win_widget_button_start(wid, 7, 0.83,  0.91, 0.009, 0.018, "TELEPORT")
 
-    ga_win_widget_go_back_button_start(wid, 0.03, 0.02, 0.04, "Close (ESC)")
+    ga_win_widget_go_back_button_start(wid, 0.03, fix_charw(0.02), 0.04, "Close (ESC)")
 
     cur_tab = TAB_BLOCKS
     last_tab = -1
@@ -774,9 +814,7 @@ function p.init(wid)
     rebuild(wid)
 end
 
-function p.__on_start(wid) p.init(wid) end
 function p.__start(wid)    p.init(wid) end
-function p.__on_end(wid)   inited = false; use_3d_mesh = nil end
 function p.__end(wid)      inited = false; use_3d_mesh = nil end
 
 function p.__process_input(wid)
@@ -1040,9 +1078,12 @@ function p.__process_input(wid)
 end
 
 function p.__render(wid)
+    aspect = ga_get_sys_f("display.camera_params.a_ratio.value")
+    ga_win_set_screen_coord_mode(wid, "screen")
+
     ga_win_set_background(wid, std.vec(0.04, 0.04, 0.06), 0.97)
 
-    ga_win_set_char_size(wid, 0.018, 0.036)
+    ga_win_set_char_size(wid, fix_charw(0.018), 0.036)
     ga_win_set_front_color(wid, std.vec(0.9, 0.85, 0.5))
     ga_win_txt_center(wid, 0.965, "CREATIVE INVENTORY")
     ga_win_set_front_color_default(wid)
@@ -1053,7 +1094,7 @@ function p.__render(wid)
     local tw = tab_len[cur_tab] * 0.0125
     ga_win_quad_color(wid, tx, 0.900, tx + tw, 0.905, std.vec(0.30, 0.85, 0.95))
 
-    ga_win_set_char_size(wid, 0.010, 0.020)
+    ga_win_set_char_size(wid, fix_charw(0.010), 0.020)
     ga_win_txt(wid, 0.02, 0.84, "SEARCH:")
 
     local sel = ga_get_s(SEL_VAR)
@@ -1258,7 +1299,8 @@ function render_wep_buttons(wid)
         function(b, bx, by, bw, bh)
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.45, 0.35, 0.20) or std.vec(0.28, 0.22, 0.13)
-            ga_win_quad_color(wid, bx - 0.002, by - bh - 0.002, bx + bw + 0.002, by + 0.002, std.vec(0.5, 0.4, 0.2))
+            local padding = 0.002
+            ga_win_quad_color(wid, bx - fix_charw(padding), by - bh - padding, bx + bw + fix_charw(padding), by + padding, std.vec(0.5, 0.4, 0.2))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_char_size(wid, 0.010, 0.020)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
@@ -1437,8 +1479,8 @@ function render_buffs_tab(wid)
     ga_win_set_front_color(wid, std.vec(0.5, 0.8, 0.5))
     local timer_y = by
     local function show_timer(label, var)
-        local ok, val = pcall(ga_get_f, var)
-        if ok and val > 0 then
+        local val = ga_get_f(var)
+        if val > 0 then
             ga_win_txt(wid, 0.03, timer_y, label .. ": " .. string.format("%.1f", val) .. "s remaining")
             timer_y = timer_y - 0.025
         end
@@ -1451,16 +1493,27 @@ function render_buffs_tab(wid)
     show_timer("Green Key",      "xar.key_time.green")
     show_timer("Universe Key",   "xar.key_time.universe")
 
-    local ok_god, god = pcall(ga_get_sys_b, "metagame.cheat.god")
-    if ok_god then
-        timer_y = timer_y - 0.01
-        if god then
-            ga_win_set_front_color(wid, std.vec(0.4, 1.0, 0.4))
-            ga_win_txt(wid, 0.03, timer_y, "GOD MODE: ON")
-        else
-            ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
-            ga_win_txt(wid, 0.03, timer_y, "God Mode: OFF")
-        end
+    local god = ga_get_sys_b("metagame.cheat.god")
+    timer_y = timer_y - 0.01
+    if god then
+        ga_win_set_front_color(wid, std.vec(0.4, 1.0, 0.4))
+        ga_win_txt(wid, 0.03, timer_y, "GOD MODE: ON")
+    else
+        ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
+        ga_win_txt(wid, 0.03, timer_y, "God Mode: OFF")
     end
     ga_win_set_front_color_default(wid)
+end
+
+function p.uncrash__info()
+    return uncrash.info{
+        local_funcs={
+            screen_aspect=screen_aspect,
+            compute_grid=compute_grid,
+            clean_name=clean_name,
+            clean_ent_name=clean_ent_name,
+            category_of=category_of,
+            -- more!!!
+        }
+    }
 end

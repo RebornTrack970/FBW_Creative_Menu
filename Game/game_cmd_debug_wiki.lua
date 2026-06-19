@@ -1,4 +1,3 @@
-local p = {}
 p.id = "debug_wiki"
 p.help = "Builds a 3D museum of block types (auto-enumerated, crashers excluded). "
       .. "Usage: debug_wiki [start] [count] [filter]"
@@ -121,10 +120,3 @@ function p.handler(str)
     end
     return false
 end
-
-if game_command_system then
-    game_command_system.add_command(p.id, p.handler)
-    game_command_system.add_help(p.id, p.get_help_str())
-end
-
-return p
