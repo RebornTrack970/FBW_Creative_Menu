@@ -1,5 +1,5 @@
 local aspect = 1
-local true_aspect = 1
+local std_aspect = 16/9
 
 local SEL_VAR  = "creative.selected_block"
 local MODE_VAR = "creative.build_mode"
@@ -31,10 +31,14 @@ local COLS, ROWS = 16, 8
 local CW, CH     = TILE_Y, TILE_Y + GAPY
 local PER_PAGE   = COLS * ROWS
 
-local function screen_aspect()
+local function fix_charw(charw)
+    return charw/aspect*std_aspect
+end
+
+local function screen_aspect() -- use variable instead
     local ok, a = pcall(ga_get_sys_f, "display.camera_params.a_ratio.value")
     if ok and type(a) == "number" and a > 0.1 then return a end
-    return 16 / 9
+    return std_aspect
 end
 
 local function compute_grid()
@@ -769,7 +773,7 @@ function p.init(wid)
     ga_win_widget_button_start(wid, 6, 0.68,  0.91, 0.009, 0.018, "INTERACT")
     ga_win_widget_button_start(wid, 7, 0.83,  0.91, 0.009, 0.018, "TELEPORT")
 
-    ga_win_widget_go_back_button_start(wid, 0.03, 0.02, 0.04, "Close (ESC)")
+    ga_win_widget_go_back_button_start(wid, 0.03, fix_charw(0.02), 0.04, "Close (ESC)")
 
     cur_tab = TAB_BLOCKS
     last_tab = -1
@@ -777,9 +781,7 @@ function p.init(wid)
     rebuild(wid)
 end
 
-function p.__on_start(wid) p.init(wid) end
 function p.__start(wid)    p.init(wid) end
-function p.__on_end(wid)   inited = false; use_3d_mesh = nil end
 function p.__end(wid)      inited = false; use_3d_mesh = nil end
 
 function p.__process_input(wid)
@@ -1043,9 +1045,8 @@ function p.__process_input(wid)
 end
 
 function p.__render(wid)
-    -- finding the aspect values
-    true_aspect = ga_get_sys_f("display.camera_params.a_ratio.value")
-    aspect = 1 -- todo
+    aspect = ga_get_sys_f("display.camera_params.a_ratio.value")
+    ga_win_set_screen_coord_mode(wid, "screen")
 
     ga_win_set_background(wid, std.vec(0.04, 0.04, 0.06), 0.97)
 
