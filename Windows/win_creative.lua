@@ -192,7 +192,7 @@ local function block_tex(raw)
     if raw:sub(1,6) == "block_" then
         -- grab the texture from the module like a normal person
         if _G[raw] and _G[raw].__get_tex then
-            found = _g[raw].__get_tex() -- returns "" if no texture.
+            found = _G[raw].__get_tex() -- returns "" if no texture.
         end
     else
         found = fuzzy_tex(string.lower(clean_name(raw)), "block_", DROP_TOKENS)
@@ -261,14 +261,28 @@ end
 
 local bent_tex_cache = {}
 
+--local mesh_table = nil
+local function set(t) local o = {} for i,v in ipairs(t) do o[v] = true end return o end
+local invalid_meshes = set{"bent_ammo_gun_3_huge","bent_genesis_marker_long","bent_genesis_marker_short"}
+local function mesh_exists(mesh)
+    --if not mesh_table then
+
+    --end
+    if invalid_meshes[mesh] then return false end
+    return true
+end
+
 local function bent_tex(raw)
     local cached = bent_tex_cache[raw]
     if cached ~= nil then return cached end
     ensure_tex_set()
     local found = ""
-    if _G[raw] and _G[raw].__get_mesh then
+    if _G[raw] then
         -- grab the texture and mesh like a normal person
-        found = ga_mesh_get_tex(_G[raw].__get_mesh())
+        local mesh = mesh_exists(raw) and raw or "" -- fbw uses mesh named the same as the bent implicitly
+        if _G[raw].__get_mesh then mesh = _G[raw].__get_mesh() end
+        if _G[raw].__on_render then mesh = "" end
+        if mesh ~= "" then found = ga_mesh_get_tex(mesh) end
     end
     if found == "" then
         local stripped = raw
