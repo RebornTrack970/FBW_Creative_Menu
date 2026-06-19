@@ -1,5 +1,3 @@
-local p = {}
-
 local SEL_VAR  = "creative.selected_block"
 local MODE_VAR = "creative.build_mode"
 local AIR      = "XAR_AIR_BASIC"
@@ -245,7 +243,6 @@ function p.handler_spawn_ent(str)
 end
 
 local function register()
-    if not game_command_system then return end
     game_command_system.add_command("creative_menu", p.handler_menu)
     game_command_system.add_help("creative_menu", "Open the creative inventory menu.")
     game_command_system.add_command("creative_set_var", p.handler_set_var)
@@ -272,7 +269,3 @@ function p.__load_game()
     ensure_vars()
     register()
 end
-
-register()
-
-return p

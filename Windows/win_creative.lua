@@ -1,3 +1,6 @@
+local aspect = 1
+local true_aspect = 1
+
 local SEL_VAR  = "creative.selected_block"
 local MODE_VAR = "creative.build_mode"
 
@@ -1040,6 +1043,10 @@ function p.__process_input(wid)
 end
 
 function p.__render(wid)
+    -- finding the aspect values
+    true_aspect = ga_get_sys_f("display.camera_params.a_ratio.value")
+    aspect = 1 -- todo
+
     ga_win_set_background(wid, std.vec(0.04, 0.04, 0.06), 0.97)
 
     ga_win_set_char_size(wid, 0.018, 0.036)
@@ -1437,8 +1444,8 @@ function render_buffs_tab(wid)
     ga_win_set_front_color(wid, std.vec(0.5, 0.8, 0.5))
     local timer_y = by
     local function show_timer(label, var)
-        local ok, val = pcall(ga_get_f, var)
-        if ok and val > 0 then
+        local val = ga_get_f(var)
+        if val > 0 then
             ga_win_txt(wid, 0.03, timer_y, label .. ": " .. string.format("%.1f", val) .. "s remaining")
             timer_y = timer_y - 0.025
         end
@@ -1451,16 +1458,14 @@ function render_buffs_tab(wid)
     show_timer("Green Key",      "xar.key_time.green")
     show_timer("Universe Key",   "xar.key_time.universe")
 
-    local ok_god, god = pcall(ga_get_sys_b, "metagame.cheat.god")
-    if ok_god then
-        timer_y = timer_y - 0.01
-        if god then
-            ga_win_set_front_color(wid, std.vec(0.4, 1.0, 0.4))
-            ga_win_txt(wid, 0.03, timer_y, "GOD MODE: ON")
-        else
-            ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
-            ga_win_txt(wid, 0.03, timer_y, "God Mode: OFF")
-        end
+    local god = ga_get_sys_b("metagame.cheat.god")
+    timer_y = timer_y - 0.01
+    if god then
+        ga_win_set_front_color(wid, std.vec(0.4, 1.0, 0.4))
+        ga_win_txt(wid, 0.03, timer_y, "GOD MODE: ON")
+    else
+        ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
+        ga_win_txt(wid, 0.03, timer_y, "God Mode: OFF")
     end
     ga_win_set_front_color_default(wid)
 end
