@@ -391,7 +391,7 @@ local function rebuild(wid)
 
         if view_mode == "RECENT" and rec_list then
             for _, nm in ipairs(rec_list) do
-                local bad = block_wiki_bad_blocks and block_wiki_bad_blocks[nm]
+                local bad = block_wiki_bad_blocks[nm]
                 local match = (search == "") or string.find(string.upper(nm), search, 1, true)
                 if (not bad) and match then
                     local c = clean_name(nm)
@@ -401,7 +401,7 @@ local function rebuild(wid)
             end
         else
             for _, nm in ipairs(names) do
-                local bad = block_wiki_bad_blocks and block_wiki_bad_blocks[nm]
+                local bad = block_wiki_bad_blocks[nm]
                 local match = (search == "") or string.find(string.upper(nm), search, 1, true)
                 local mode_ok = true
                 if fav_set then mode_ok = (fav_set[nm] == true) end
