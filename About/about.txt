@@ -1,0 +1,2 @@
+Block Wiki Cmd + Debug Inventory
+Press G for Inv, V to press.

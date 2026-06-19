@@ -1,0 +1,5 @@
+PACKAGE_OPEN_FRACTALBASE    F8.downup    "" "open_window fractalbase" ""
+PACKAGE_CREATIVE_MENU       G.downup     "" "creative_menu" ""
+PACKAGE_CREATIVE_TOGGLE     V.downup     "" "creative_build_toggle" ""
+PACKAGE_CREATIVE_WP_WARP    F6.downup    "" "creative_wp_warp" ""
+PACKAGE_CREATIVE_WP_HOME    F7.downup    "" "creative_wp_home" ""
