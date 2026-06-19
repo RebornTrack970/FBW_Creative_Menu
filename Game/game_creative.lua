@@ -123,7 +123,7 @@ function p.handler_place(str)
         ga_hud_msg("Creative: no block selected (press G)", 2.0)
         return false
     end
-    if block_wiki_bad_blocks and block_wiki_bad_blocks[name] then
+    if block_wiki_bad_blocks[name] then
         ga_hud_msg("Creative: that block is excluded (crashes)", 2.0)
         return false
     end

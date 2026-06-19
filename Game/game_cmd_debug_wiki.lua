@@ -23,11 +23,63 @@ function p.get_help_str()
     return p.help
 end
 
-function p.__load_game()
-    if game_command_system then
-        game_command_system.add_command(p.id, p.handler)
-        game_command_system.add_help(p.id, p.get_help_str())
+local co = nil
+function p.__update_discrete_post()
+    if co then
+        local out = coroutine.resume(co)
+        ga_console_print(tostring(out))
+        if not out then co = nil end
     end
+end
+
+function p.__load_game()
+    game_command_system.add_command(p.id, p.handler)
+    game_command_system.add_help(p.id, p.get_help_str())
+    game_command_system.add_command("debug_wikit2", function(str)
+        local hot = str:sub(1,3) == "hot"
+        co = coroutine.create(function()
+            local function wait(ticks) for _=1,ticks do coroutine.yield() end end
+            local main = "eee_777_777_777_777_777_777"
+            local delay = 1
+            game_msg.add("Blocks per second: " .. tostring(25/(delay*2)))
+            ga_tele(main, std.vec(2,2,2))
+            wait(1)
+            local blocks = build_block_list()
+            local level = ga_get_viewer_level()
+            local idx = 1
+            if hot then
+                local max = nil 
+                for v in pairs(block_wiki_bad_blocks) do
+                    max = max or v
+                    if v > max then max = v end
+                end
+                for i = 1,#blocks do
+                    if blocks[i] > max then idx = i break end
+                end
+                if str:sub(4,4) == " " and tonumber(str:sub(5)) then idx = idx + tonumber(str:sub(5)) end
+                game_msg.add("Starting at idx " .. idx)
+                for i = idx,math.min(idx+10,#blocks) do ga_print(blocks[i]) end
+            end
+            for i = idx,#blocks do
+                local bt = blocks[i]
+                ga_print("!!!!!!!!!!!!!!!!!!!! About to place block: " .. bt .. " idx " .. i)
+                --assert(not(blocks[i-1]) or (blocks[i-1] == ga_bp_to_bt(level,std.vec(7,7,7))), (tostring(blocks[i-1]) .. " " .. tostring(ga_bp_to_bt(level,std.vec(7,7,7)))))
+                local pos = 7--0 + (i//20)%10
+                ga_block_change_rl(level,std.vec(7,7,pos),bt,2.0+i*0.01)
+                ga_hud_msg(bt, 0.5)
+                wait(delay)
+                ga_tele(main .. "_77" .. pos, std.vec(2,2,2))
+                wait(delay)
+                --main = main:sub(1,-2) .. (i//200)
+                ga_tele(main, std.vec(2,2,2))
+                -- should be able to get away with this.
+                --wait(delay)
+            end
+        end)
+        ga_console_print("Exit console to being testing")
+        ga_console_print("Please enable god also")
+    end)
+    game_command_system.add_help("debug_wikit2", "Test all blocktypes not marked as bad progressively.\nHot parameter means we start from the last listed bad block\nUsage: debug_wikit2 [hot]")
 end
 
 function p.handler(str)
