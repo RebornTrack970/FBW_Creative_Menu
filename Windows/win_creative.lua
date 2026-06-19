@@ -744,6 +744,7 @@ local function wep_buttons_layout(cb_section, cb_button)
 end
 
 function p.init(wid)
+    aspect = ga_get_sys_f("display.camera_params.a_ratio.value")
     if inited then return end
     inited = true
     compute_grid()
