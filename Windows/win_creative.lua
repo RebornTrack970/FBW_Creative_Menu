@@ -188,7 +188,15 @@ local function block_tex(raw)
     local cached = tex_cache[raw]
     if cached ~= nil then return cached end
     ensure_tex_set()
-    local found = fuzzy_tex(string.lower(clean_name(raw)), "block_", DROP_TOKENS)
+    local found
+    if raw:sub(1,6) == "block_" then
+        -- grab the texture from the module like a normal person
+        if _G[raw] and _G[raw].__get_tex then
+            found = _g[raw].__get_tex() -- returns "" if no texture.
+        end
+    else
+        found = fuzzy_tex(string.lower(clean_name(raw)), "block_", DROP_TOKENS)
+    end
     tex_cache[raw] = found
     return found
 end
@@ -257,18 +265,24 @@ local function bent_tex(raw)
     local cached = bent_tex_cache[raw]
     if cached ~= nil then return cached end
     ensure_tex_set()
-    local stripped = raw
-    if string.sub(raw, 1, 5) == "bent_" then stripped = string.sub(raw, 6) end
-    local cands = {
-        raw,
-        stripped,
-        (string.gsub(stripped, "_once", "")),
-        "ent_" .. stripped,
-    }
     local found = ""
-    for _, cd in ipairs(cands) do
-        local m = (tex_set[cd] and cd) or ntex(cd)
-        if m then found = m; break end
+    if _G[raw] and _G[raw].__get_mesh then
+        -- grab the texture and mesh like a normal person
+        found = ga_mesh_get_tex(_G[raw].__get_mesh())
+    end
+    if found == "" then
+        local stripped = raw
+        if string.sub(raw, 1, 5) == "bent_" then stripped = string.sub(raw, 6) end
+        local cands = {
+            raw,
+            stripped,
+            (string.gsub(stripped, "_once", "")),
+            "ent_" .. stripped,
+        }
+        for _, cd in ipairs(cands) do
+            local m = (tex_set[cd] and cd) or ntex(cd)
+            if m then found = m; break end
+        end
     end
     bent_tex_cache[raw] = found
     return found
