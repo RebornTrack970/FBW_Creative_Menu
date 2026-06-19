@@ -1,6 +1,8 @@
 local aspect = 1
 local std_aspect = 16/9
 
+-- important: width of ga_win_txt = len_txt*char_width
+
 local SEL_VAR  = "creative.selected_block"
 local MODE_VAR = "creative.build_mode"
 
@@ -31,6 +33,7 @@ local COLS, ROWS = 16, 8
 local CW, CH     = TILE_Y, TILE_Y + GAPY
 local PER_PAGE   = COLS * ROWS
 
+-- makes the text size look the same as std_aspect for all aspect ratios
 local function fix_charw(charw)
     return charw/aspect*std_aspect
 end
@@ -327,7 +330,8 @@ local function small_btn(wid, cursor, x, y, w, h, label, active)
     local hov = btn_rect(cursor, x, y, w, h)
     local col = active and std.vec(0.50, 0.45, 0.18)
              or (hov and std.vec(0.34, 0.34, 0.50) or std.vec(0.18, 0.20, 0.28))
-    ga_win_quad_color(wid, x - 0.0015, y - 0.0015, x + w + 0.0015, y + h + 0.0015, std.vec(0.40, 0.40, 0.55))
+    local padding = 0.002
+    ga_win_quad_color(wid, x - fix_charw(padding), y - padding, x + w + fix_charw(padding), y + h + padding, std.vec(0.40, 0.40, 0.55))
     ga_win_quad_color(wid, x, y, x + w, y + h, col)
     ga_win_set_char_size(wid, 0.009, 0.018)
     ga_win_set_front_color(wid, std.vec(1, 1, 1))
@@ -762,7 +766,7 @@ function p.init(wid)
     ga_init_b(E_ALLY, false)
     ga_init_i(E_TTL, 0)
 
-    ga_win_widget_text_input_start(wid, 0.835, 0.012, 0.024)
+    ga_win_widget_text_input_start(wid, 0.835, fix_charw(0.012), 0.024)
     ga_win_widget_text_input_set_text(wid, "")
     ga_win_widget_text_input_set_enable_enter(wid, false)
 
@@ -1051,7 +1055,7 @@ function p.__render(wid)
 
     ga_win_set_background(wid, std.vec(0.04, 0.04, 0.06), 0.97)
 
-    ga_win_set_char_size(wid, 0.018, 0.036)
+    ga_win_set_char_size(wid, fix_charw(0.018), 0.036)
     ga_win_set_front_color(wid, std.vec(0.9, 0.85, 0.5))
     ga_win_txt_center(wid, 0.965, "CREATIVE INVENTORY")
     ga_win_set_front_color_default(wid)
@@ -1062,7 +1066,7 @@ function p.__render(wid)
     local tw = tab_len[cur_tab] * 0.0125
     ga_win_quad_color(wid, tx, 0.900, tx + tw, 0.905, std.vec(0.30, 0.85, 0.95))
 
-    ga_win_set_char_size(wid, 0.010, 0.020)
+    ga_win_set_char_size(wid, fix_charw(0.010), 0.020)
     ga_win_txt(wid, 0.02, 0.84, "SEARCH:")
 
     local sel = ga_get_s(SEL_VAR)
@@ -1267,7 +1271,8 @@ function render_wep_buttons(wid)
         function(b, bx, by, bw, bh)
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.45, 0.35, 0.20) or std.vec(0.28, 0.22, 0.13)
-            ga_win_quad_color(wid, bx - 0.002, by - bh - 0.002, bx + bw + 0.002, by + 0.002, std.vec(0.5, 0.4, 0.2))
+            local padding = 0.002
+            ga_win_quad_color(wid, bx - fix_charw(padding), by - bh - padding, bx + bw + fix_charw(padding), by + padding, std.vec(0.5, 0.4, 0.2))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_char_size(wid, 0.010, 0.020)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
@@ -1470,4 +1475,17 @@ function render_buffs_tab(wid)
         ga_win_txt(wid, 0.03, timer_y, "God Mode: OFF")
     end
     ga_win_set_front_color_default(wid)
+end
+
+function p.uncrash__info()
+    return uncrash.info{
+        local_funcs={
+            screen_aspect=screen_aspect,
+            compute_grid=compute_grid,
+            clean_name=clean_name,
+            clean_ent_name=clean_ent_name,
+            category_of=category_of,
+            -- more!!!
+        }
+    }
 end
