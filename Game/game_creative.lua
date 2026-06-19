@@ -1,6 +1,6 @@
 local SEL_VAR  = "creative.selected_block"
 local MODE_VAR = "creative.build_mode"
-local AIR      = "XAR_AIR_BASIC"
+local AIR      = "XAR_EMPTY_BORING"
 
 local function ensure_vars()
     ga_init_s(SEL_VAR, "")
