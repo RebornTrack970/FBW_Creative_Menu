@@ -37,6 +37,9 @@ local PER_PAGE   = COLS * ROWS
 local function fix_charw(charw)
     return charw/aspect*std_aspect
 end
+local function fix_padding(padding)
+    return padding/aspect
+end
 
 local function screen_aspect() -- use variable instead
     local ok, a = pcall(ga_get_sys_f, "display.camera_params.a_ratio.value")
@@ -193,10 +196,14 @@ local function block_tex(raw)
         -- grab the texture from the module like a normal person
         if _G[raw] and _G[raw].__get_tex then
             found = _G[raw].__get_tex() -- returns "" if no texture.
+        elseif _G[raw] and _G[raw].__get_bt_to_copy then -- new 1.02.00 feature
+            found = block_tex(_G[raw].__get_bt_to_copy())
         end
     else
         found = fuzzy_tex(string.lower(clean_name(raw)), "block_", DROP_TOKENS)
     end
+    -- TODO error handling here
+    found = found or ""
     tex_cache[raw] = found
     return found
 end
@@ -358,8 +365,8 @@ local function small_btn(wid, cursor, x, y, w, h, label, active)
     local hov = btn_rect(cursor, x, y, w, h)
     local col = active and std.vec(0.50, 0.45, 0.18)
              or (hov and std.vec(0.34, 0.34, 0.50) or std.vec(0.18, 0.20, 0.28))
-    local padding = 0.002
-    ga_win_quad_color(wid, x - fix_charw(padding), y - padding, x + w + fix_charw(padding), y + h + padding, std.vec(0.40, 0.40, 0.55))
+    local padding = 0.0025
+    ga_win_quad_color(wid, x - fix_padding(padding), y - padding, x + w + fix_padding(padding), y + h + padding, std.vec(0.40, 0.40, 0.55))
     ga_win_quad_color(wid, x, y, x + w, y + h, col)
     ga_win_set_char_size(wid, 0.009, 0.018)
     ga_win_set_front_color(wid, std.vec(1, 1, 1))
@@ -1351,11 +1358,11 @@ function render_grid_tab(wid, mode)
 
             if is_hov or is_sel then
                 local fcol = is_sel and std.vec(1.0, 0.9, 0.2) or std.vec(1.0, 1.0, 1.0)
-                local t = 0.0035
+                local t = 0.004
                 ga_win_quad_color(wid, minx, maxy - t, maxx, maxy, fcol)
                 ga_win_quad_color(wid, minx, miny, maxx, miny + t, fcol)
-                ga_win_quad_color(wid, minx, miny, minx + t, maxy, fcol)
-                ga_win_quad_color(wid, maxx - t, miny, maxx, maxy, fcol)
+                ga_win_quad_color(wid, minx, miny, minx + fix_padding(t), maxy, fcol)
+                ga_win_quad_color(wid, maxx - fix_padding(t), miny, maxx, maxy, fcol)
             end
 
             if mode == "weapon" then
