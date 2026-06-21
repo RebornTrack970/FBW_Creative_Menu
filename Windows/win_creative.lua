@@ -1518,7 +1518,7 @@ function render_buffs_tab(wid)
 end
 
 function p.uncrash__info()
-    return uncrash.info{
+    local out = uncrash.info {
         local_funcs={
             screen_aspect=screen_aspect,
             compute_grid=compute_grid,
@@ -1528,6 +1528,11 @@ function p.uncrash__info()
             -- more!!!
         }
     }
+    screen_aspect=out.screen_aspect
+    compute_grid=out.compute_grid
+    clean_name=out.clean_name
+    clean_ent_name=out.clean_ent_name
+    category_of=out.category_of
 end
 
 -- why is this window file 1.5k lines
