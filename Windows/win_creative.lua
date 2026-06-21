@@ -673,14 +673,14 @@ local ITEM_BUTTONS = {
     { section = "ARMOR", var = "xar.player.armor.amount", buttons = {
         { label = "+100",  delta = 100 },
         { label = "+1000", delta = 1000 },
+        { label = "+10000", delta = 10000 },
         { label = "Set 0", value = 0 },
-        { label = "Max",   value = 99999 },
     }},
     { section = "SHIELD", var = "xar.player.shield.amount", buttons = {
         { label = "+100",  delta = 100 },
         { label = "+1000", delta = 1000 },
+        { label = "+1000", delta = 10000 },
         { label = "Set 0", value = 0 },
-        { label = "Max",   value = 99999 },
     }},
     { section = "XP (total)", var = "xar.experience.total", buttons = {
         { label = "+1000 XP", delta = 1000 },
@@ -715,9 +715,11 @@ local BUFF_BUTTONS = {
     }},
     { section = "CHEATS (toggle)", entries = {
         -- engine console toggles; do NOT ga_set_sys_b metagame.cheat.god (READ ONLY = native crash)
+        { label = "Enable cheats",   raw = "cheat hodisclosetov" },
+        { label = "Disable cheats",   raw = "cheat off" },
         { label = "God Mode",   raw = "god" },
         { label = "Noclip/Fly", raw = "noclip" },
-        { label = "Shrink Any", raw = "shrinkany" },
+        { label = "ShrinkAny", raw = "shrinkany" },
     }},
 }
 
@@ -752,13 +754,14 @@ end
 
 local WEP_ACTION_ROWS = {
     { header = "AMMO (selected weapon)", buttons = {
-        { label = "Max Ammo",    fn = function() set_sel_ammo(9999) end },
+        { label = "Max Ammo",    fn = function() set_sel_ammo(game_wep_modes.get_ammo_max(sel_weapon)) end },
         { label = "Refill 999",  fn = function() set_sel_ammo(999) end },
         { label = "Empty Ammo",  fn = function() set_sel_ammo(0) end },
     }},
     { header = "UPGRADES (selected weapon)", buttons = {
         { label = "Upgrades 100",   fn = function() set_sel_upgrades(100) end },
-        { label = "Upgrades MAX",   fn = function() set_sel_upgrades(1000) end },
+        { label = "Upgrades 1000",   fn = function() set_sel_upgrades(1000) end },
+        { label = "Upgrades 10000",   fn = function() set_sel_upgrades(10000) end },
         { label = "Remove Upgrades",fn = function() set_sel_upgrades(0) end },
     }},
     { header = "EQUIP", buttons = {
@@ -1349,6 +1352,8 @@ function render_grid_tab(wid, mode)
             end
             if tex ~= "" then
                 ga_win_quad(wid, minx, miny, maxx, maxy, tex)
+            elseif mode == "weapon" then
+                ga_win_quad(wid, minx, miny, maxx, maxy, "ammo_gun"..(gi-1))
             else
                 local c = it.col
                 if is_hov then c = std.vec(0.85, 0.85, 0.95) end
@@ -1365,12 +1370,12 @@ function render_grid_tab(wid, mode)
                 ga_win_quad_color(wid, maxx - fix_padding(t), miny, maxx, maxy, fcol)
             end
 
-            if mode == "weapon" then
-                ga_win_set_char_size(wid, 0.012, 0.024)
-                ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
-                ga_win_txt(wid, minx + (maxx - minx) * 0.5 - 0.004, miny + (maxy - miny) * 0.5 - 0.012, tostring(it.raw))
-                ga_win_set_front_color_default(wid)
-            elseif mode == "teleport" then
+            --f mode == "weapon" then
+                --ga_win_set_char_size(wid, 0.012, 0.024)
+                --ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
+                --ga_win_txt(wid, minx + (maxx - minx) * 0.5 - 0.004, miny + (maxy - miny) * 0.5 - 0.012, tostring(it.raw))
+                --ga_win_set_front_color_default(wid)
+            --[[else]]if mode == "teleport" then
                 local max_chars = math.max(1, math.floor((maxx - minx) / 0.008))
                 ga_win_set_char_size(wid, 0.006, 0.012)
                 ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
@@ -1524,3 +1529,5 @@ function p.uncrash__info()
         }
     }
 end
+
+-- why is this window file 1.5k lines
