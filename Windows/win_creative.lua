@@ -361,11 +361,12 @@ local function add_recent(raw)
     csv_save(REC_VAR, t)
 end
 
+local default_padding = 0.0025
 local function small_btn(wid, cursor, x, y, w, h, label, active)
     local hov = btn_rect(cursor, x, y, w, h)
     local col = active and std.vec(0.50, 0.45, 0.18)
              or (hov and std.vec(0.34, 0.34, 0.50) or std.vec(0.18, 0.20, 0.28))
-    local padding = 0.0025
+    local padding = default_padding
     ga_win_quad_color(wid, x - fix_padding(padding), y - padding, x + w + fix_padding(padding), y + h + padding, std.vec(0.40, 0.40, 0.55))
     ga_win_quad_color(wid, x, y, x + w, y + h, col)
     ga_win_set_char_size(wid, 0.009, 0.018)
@@ -1309,7 +1310,7 @@ function render_wep_buttons(wid)
         function(b, bx, by, bw, bh)
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.45, 0.35, 0.20) or std.vec(0.28, 0.22, 0.13)
-            local padding = 0.002
+            local padding = default_padding
             ga_win_quad_color(wid, bx - fix_charw(padding), by - bh - padding, bx + bw + fix_charw(padding), by + padding, std.vec(0.5, 0.4, 0.2))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_char_size(wid, 0.010, 0.020)
@@ -1429,7 +1430,8 @@ function render_items_tab(wid)
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.4, 0.6, 0.8) or std.vec(0.2, 0.3, 0.4)
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
-            ga_win_quad_color(wid, bx - 0.002, by - bh - 0.002, bx + bw + 0.002, by + 0.002, std.vec(0.35, 0.35, 0.5))
+            local padding = default_padding
+            ga_win_quad_color(wid, bx - fix_padding(padding), by - bh - padding, bx + bw + fix_padding(padding), by + padding, std.vec(0.35, 0.35, 0.5))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
             ga_win_txt(wid, bx + 0.005, by - bh + 0.008, b.label)
@@ -1476,7 +1478,8 @@ function render_buffs_tab(wid)
             end
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.5, 0.4, 0.6) or std.vec(0.25, 0.20, 0.30)
-            ga_win_quad_color(wid, bx - 0.002, by - bh - 0.002, bx + bw + 0.002, by + 0.002, std.vec(0.40, 0.30, 0.50))
+            local padding = default_padding
+            ga_win_quad_color(wid, bx - fix_padding(padding), by - bh - padding, bx + bw + fix_padding(padding), by + padding, std.vec(0.40, 0.30, 0.50))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
             ga_win_txt(wid, bx + 0.004, by - bh + 0.007, e.label)
@@ -1512,7 +1515,7 @@ function render_buffs_tab(wid)
         ga_win_txt(wid, 0.03, timer_y, "GOD MODE: ON")
     else
         ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
-        ga_win_txt(wid, 0.03, timer_y, "God Mode: OFF")
+        ga_win_txt(wid, 0.03, timer_y, "GOD MODE: OFF")
     end
     ga_win_set_front_color_default(wid)
 end
