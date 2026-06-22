@@ -835,7 +835,7 @@ function p.__process_input(wid)
                 local gi = hovered_index(cursor)
                 if gi >= 1 and items[gi] then
                     local was = fav_toggle(items[gi].raw)
-                    ga_hud_msg(was and ("★ Favorited: " .. items[gi].label) or ("Unfavorited: " .. items[gi].label), 1.5)
+                    ga_hud_msg(was and ("Favorited: " .. items[gi].label) or ("Unfavorited: " .. items[gi].label), 1.5)
                     ga_play_sound("menu_select")
                 end
             end
