@@ -22,8 +22,8 @@ local function bind_mouse_creative()
     ga_command('bind MOUSE1.downup tocommand "creative_break"')
     ga_command('bind MOUSE2.downup tocommand "creative_place"')
     ga_command('bind MOUSE3.downup tocommand "creative_eyedrop"')
-    ga_command('bind C.down tocommand "creative_eyedrop"')
-    ga_command('bind BACKSPACE.down tocommand "creative_undo"')
+    ga_command('bind C.downup tocommand "creative_eyedrop"')
+    ga_command('bind BACKSPACE.downup tocommands "creative_undo start" "creative_undo end"')
 end
 
 local function bind_mouse_weapons()
@@ -73,7 +73,7 @@ function p.handler_toggle(str)
 end
 
 local undo_stack = {}
-local UNDO_MAX   = 60
+local UNDO_MAX   = 1000
 
 local function undo_push(batch)
     if #batch == 0 then return end
@@ -104,13 +104,39 @@ local function brush_cells(center)
     return cells
 end
 
+local base_paths
+-- turn a path string into a minipath which is smaller (but coupled to base_paths)
+local function make_minipath(path)
+    -- stub!!!
+    return path
+end
+local function full_path_from_minipath(minipath)
+    -- stub!!!
+    return minipath
+end
+
+-- cache does not survive across update discretes
+local function get_undo_pos(level, bp, cache)
+    local vcp = std.bp_to_parent_vcp(bp)
+    local vcpstr = vcp.x .. "_" .. vcp.y .. "_" .. vcp.z
+    local lbph = std.lbp_to_lbph(std.bp_to_lbp(bp))
+    if cache[vcpstr] then return cache[vcpstr],lbph end
+    local path = ga_chunk_id_to_path(ga_vcp_to_chunk_id(level, vcp))
+
+    local minipath = make_minipath(path)
+
+    return minipath,lbph
+end
+
 local function apply_brush(level, center, new_name)
+    local cache = {}
     local batch = {}
     for _, cell in ipairs(brush_cells(center)) do
         local ok_old, old = pcall(ga_block_get, level, cell)
         if ok_old and old ~= new_name then
-            local ok = pcall(ga_block_change_perm, level, cell, new_name)
-            if ok then batch[#batch + 1] = { level = level, bp = cell, old = old } end
+            ga_block_change_perm(level, cell, new_name)
+            local path,lbph = get_undo_pos(level, cell, cache)
+            batch[#batch + 1] = { path = path, lbph = lbph, old = old }
         end
     end
     undo_push(batch)
@@ -153,40 +179,61 @@ function p.handler_eyedrop(str)
     return false
 end
 
+p.undo_held = false
+p.undo_held_dur = 0
+function p.__update_discrete_post()
+    if p.undo_held then
+        local second = 25
+        if p.undo_held_dur == 0 or p.undo_held_dur >= second then
+            p.handler_undo()
+        end
+        p.undo_held_dur = p.undo_held_dur + 1
+    else
+        p.undo_held_dur = 0
+    end
+end
+
 function p.handler_undo(str)
     local batch = undo_stack[#undo_stack]
     if batch == nil then ga_hud_msg("Undo: nothing to undo", 1.0); return false end
-    undo_stack[#undo_stack] = nil
+    local chunk_ids = {}
     local n = 0
+    
+    local cache = {}
+    for i = 1,#batch do
+        local v = batch[i]
+        if cache[v.path] then chunk_ids[i] = cache[v.path] end
+        local chunk_id = ga_path_to_chunk_id(full_path_from_minipath(v.path))
+        if chunk_id < 0 then
+            -- TODO: handle better
+            ga_hud_msg("Undo ERROR: chunk not loaded!", 2.0)
+            return
+        end
+        cache[v.path] = chunk_id
+        chunk_ids[i] = chunk_id
+    end
+    undo_stack[#undo_stack] = nil
     for i = #batch, 1, -1 do
         local e = batch[i]
-        if pcall(ga_block_change_perm, e.level, e.bp, e.old) then n = n + 1 end
+        n = n + 1
+        local level = ga_chunk_id_to_level(chunk_ids[i])
+        local bp = std.chunk_id_and_lbph_to_bp(chunk_ids[i], e.lbph)
+        ga_block_change_perm(level, bp, e.old)
     end
     ga_hud_msg("Undo: restored " .. n .. " block(s)", 1.5)
-    return false
 end
 
 function p.handler_wp_home(str)
-    if game_base_wp_system and game_base_wp_system.teleport_home then
-        local ok, err = pcall(game_base_wp_system.teleport_home)
-        if not ok then ga_hud_msg("WP home FAIL: " .. tostring(err), 2.5) end
-    else
-        ga_hud_msg("Waypoint system unavailable", 2.0)
-    end
-    return false
+    game_base_wp_system.teleport_home()
 end
 
 function p.handler_wp_warp(str)
-    if not (game_base_wp_system and game_base_wp_system.teleport_to_first_matches_fancy) then
-        ga_hud_msg("Waypoint system unavailable", 2.0); return false
-    end
     local pat = ga_get_s("creative.wp_search")
-    if pat == nil or pat == "" then
-        ga_hud_msg("Warp: type a waypoint name in the menu first", 2.5); return false
+    if pat == "" then
+        ga_hud_msg("Warp: type a waypoint name in the menu first", 2.5)
+        return
     end
-    local ok, err = pcall(game_base_wp_system.teleport_to_first_matches_fancy, pat)
-    if not ok then ga_hud_msg("Warp FAIL: " .. tostring(err), 2.5) end
-    return false
+    game_base_wp_system.teleport_to_first_matches_fancy(pat)
 end
 
 function p.handler_set_var(str)
@@ -257,8 +304,10 @@ local function register()
     game_command_system.add_help("creative_break", "Break the block you look at.")
     game_command_system.add_command("creative_eyedrop", p.handler_eyedrop)
     game_command_system.add_help("creative_eyedrop", "Pick the looked-at block into the selection (eyedropper).")
-    game_command_system.add_command("creative_undo", p.handler_undo)
-    game_command_system.add_help("creative_undo", "Undo the last creative place/break/brush.")
+    game_command_system.add_command("creative_undo", function(str)
+        p.undo_held = str == "start"
+    end)
+    game_command_system.add_help("creative_undo", "Begin/stop undoing the last creative place/break/brush.")
     game_command_system.add_command("creative_wp_home", p.handler_wp_home)
     game_command_system.add_help("creative_wp_home", "Teleport to your EMERGENCY waypoint.")
     game_command_system.add_command("creative_wp_warp", p.handler_wp_warp)
