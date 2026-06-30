@@ -37,15 +37,12 @@ local PER_PAGE   = COLS * ROWS
 local function fix_charw(charw)
     return charw/aspect*std_aspect
 end
-
-local function screen_aspect() -- use variable instead
-    local ok, a = pcall(ga_get_sys_f, "display.camera_params.a_ratio.value")
-    if ok and type(a) == "number" and a > 0.1 then return a end
-    return std_aspect
+local function fix_padding(padding)
+    return padding/aspect
 end
 
 local function compute_grid()
-    local tile_w = TILE_Y / screen_aspect()
+    local tile_w = TILE_Y / aspect
     CW = tile_w + GAPX
     CH = TILE_Y + GAPY
     COLS = math.max(1, math.floor((GRID_W + GAPX) / CW))
@@ -147,8 +144,8 @@ local function ensure_tex_set()
     end
     local function pull(pre)
         local n = 0
-        local ok, arr = pcall(ga_get_tex_names_with_prefix, pre)
-        if ok and arr then
+        local arr = ga_get_tex_names_with_prefix(pre)
+        if arr then
             for _, v in ipairs(arr) do
                 local nm = v
                 if type(v) == "table" then nm = v.name end
@@ -193,10 +190,14 @@ local function block_tex(raw)
         -- grab the texture from the module like a normal person
         if _G[raw] and _G[raw].__get_tex then
             found = _G[raw].__get_tex() -- returns "" if no texture.
+        elseif _G[raw] and _G[raw].__get_bt_to_copy then -- new 1.02.00 feature
+            found = block_tex(_G[raw].__get_bt_to_copy())
         end
     else
         found = fuzzy_tex(string.lower(clean_name(raw)), "block_", DROP_TOKENS)
     end
+    -- TODO error handling here
+    found = found or ""
     tex_cache[raw] = found
     return found
 end
@@ -236,8 +237,8 @@ end
 
 local function enum_names(fn, prefix)
     local out, seen = {}, {}
-    local ok, arr = pcall(fn, prefix)
-    if ok and arr then
+    local arr = fn(prefix)
+    if arr then
         for _, v in ipairs(arr) do
             local nm = v
             if type(v) == "table" then nm = v.name end
@@ -307,35 +308,36 @@ local function set_var(cmd_str)
     for w in string.gmatch(cmd_str or "", "%S+") do a[#a + 1] = w end
     local t, var, val = a[1], a[2], a[3]
     if t == nil or var == nil then return end
-    local ok, err = pcall(function()
-        if     t == "di" then ga_set_i_by_delta(var, tonumber(val) or 0)
-        elseif t == "i"  then ga_set_i(var, tonumber(val) or 0)
-        elseif t == "f"  then ga_set_f(var, tonumber(val) or 0)
-        elseif t == "fi" then ga_set_f_by_delta(var, tonumber(val) or 0)
-        elseif t == "b"  then ga_set_b(var, val == "true")
-        elseif t == "s"  then ga_set_s(var, val or "")
-        end
-    end)
-    if ok then
-        ga_hud_msg("set " .. var, 1.0)
-    else
-        ga_hud_msg("set FAIL: " .. tostring(err), 3.0)
+    if     t == "di" then ga_set_i_by_delta(var, tonumber(val) or 0)
+    elseif t == "i"  then ga_set_i(var, tonumber(val) or 0)
+    elseif t == "f"  then ga_set_f(var, tonumber(val) or 0)
+    elseif t == "fi" then ga_set_f_by_delta(var, tonumber(val) or 0)
+    elseif t == "b"  then ga_set_b(var, val == "true")
+    elseif t == "s"  then ga_set_s(var, val or "")
     end
+    ga_hud_msg("set " .. var, 1.0)
 end
 
 local function btn_rect(cursor, x, y, w, h)
     return cursor.x >= x and cursor.x <= x + w and cursor.y >= y and cursor.y <= y + h
 end
+local function btn_rect2(cursor, x, y, w, h)
+    if btn_rect(cursor, x, y, w, h) then
+        ga_play_sound("menu_select")
+        return true
+    end
+    return false
+end
 
 local function csv_list(var)
     local out = {}
-    local ok, s = pcall(ga_get_s, var)
-    if ok and type(s) == "string" then
+    local s = ga_get_s(var)
+    if type(s) == "string" then
         for w in string.gmatch(s, "[^,]+") do out[#out + 1] = w end
     end
     return out
 end
-local function csv_save(var, t) pcall(ga_set_s, var, table.concat(t, ",")) end
+local function csv_save(var, t) ga_set_s(var, table.concat(t, ",")) end
 local function list_has(t, v) for _, x in ipairs(t) do if x == v then return true end end return false end
 
 local function is_fav(raw) return list_has(csv_list(FAV_VAR), raw) end
@@ -354,12 +356,13 @@ local function add_recent(raw)
     csv_save(REC_VAR, t)
 end
 
+local default_padding = 0.0025
 local function small_btn(wid, cursor, x, y, w, h, label, active)
     local hov = btn_rect(cursor, x, y, w, h)
     local col = active and std.vec(0.50, 0.45, 0.18)
              or (hov and std.vec(0.34, 0.34, 0.50) or std.vec(0.18, 0.20, 0.28))
-    local padding = 0.002
-    ga_win_quad_color(wid, x - fix_charw(padding), y - padding, x + w + fix_charw(padding), y + h + padding, std.vec(0.40, 0.40, 0.55))
+    local padding = default_padding
+    ga_win_quad_color(wid, x - fix_padding(padding), y - padding, x + w + fix_padding(padding), y + h + padding, std.vec(0.40, 0.40, 0.55))
     ga_win_quad_color(wid, x, y, x + w, y + h, col)
     ga_win_set_char_size(wid, 0.009, 0.018)
     ga_win_set_front_color(wid, std.vec(1, 1, 1))
@@ -368,14 +371,13 @@ local function small_btn(wid, cursor, x, y, w, h, label, active)
     return hov
 end
 
-local function geti(var, d) local ok, v = pcall(ga_get_i, var); if ok and v ~= nil then return v end return d end
-local function gets(var, d) local ok, v = pcall(ga_get_s, var); if ok and type(v) == "string" and v ~= "" then return v end return d end
+local function gets(var, d) local v = ga_get_s(var); if type(v) == "string" and v ~= "" then return v end return d end
 
 local function rebuild(wid)
     items = {}
     local search = ""
-    local ok_search, search_val = pcall(ga_win_widget_text_input_get_text, wid)
-    if ok_search and search_val then search = string.upper(search_val) end
+    local search_val = ga_win_widget_text_input_get_text(wid)
+    if search_val then search = string.upper(search_val) end
 
     if cur_tab == TAB_BLOCKS then
         local fav_set, rec_list
@@ -463,8 +465,8 @@ local function rebuild(wid)
 
     elseif cur_tab == TAB_TELEPORT then
         if game_base_wp_system and game_base_wp_system.get_wps_filtered then
-            local ok, nodes = pcall(game_base_wp_system.get_wps_filtered, false, "")
-            if ok and nodes then
+            local nodes = game_base_wp_system.get_wps_filtered(false, "")
+            if nodes then
                 for _, node in ipairs(nodes) do
                     local full = game_base_wp_system.get_full_wp_name(node)
                     local match = (search == "") or string.find(string.upper(full), search, 1, true)
@@ -516,7 +518,7 @@ local function hovered_index(cursor)
 end
 
 local function set_build_mode(on)
-    pcall(ga_set_b, MODE_VAR, on)
+    ga_set_b(MODE_VAR, on)
     if on then
         ga_command('bind MOUSE1.downup tocommand "creative_break"')
         ga_command('bind MOUSE2.downup tocommand "creative_place"')
@@ -549,13 +551,9 @@ end
 local function choose_entity(gi)
     local it = items[gi]
     if it == nil then return end
-    local count  = geti(E_COUNT, 1)
-    local dist   = geti(E_DIST, 4)
-    local freeze = false
-    local ally   = false
-    local ttl    = geti(E_TTL, 0)
-    local ok_fr, fr = pcall(ga_get_b, E_FREEZE); if ok_fr then freeze = fr end
-    local ok_al, al = pcall(ga_get_b, E_ALLY);   if ok_al then ally = al end
+    local count  = ga_get_i(E_COUNT)
+    local dist   = ga_get_i(E_DIST)
+    local ttl    = ga_get_i(E_TTL)
     if count < 1 then count = 1 end
     if count > 20 then count = 20 end
     if dist < 1 then dist = 1 end
@@ -566,45 +564,33 @@ local function choose_entity(gi)
     local look  = ga_get_sys_v("game.player.camera.look")
     local spawned = 0
     for i = 1, count do
-        local ok, err = pcall(function()
-            local spread = 0
-            if count > 1 then spread = (i - (count + 1) / 2) * 1.5 end
-            local px = off.x + look.x * dist + (-look.z) * spread
-            local py = off.y + look.y * dist
-            local pz = off.z + look.z * dist + look.x * spread
-            local pos = std.vec(px, py, pz)
-            ga_ment_start(level, pos, it.raw)
-            if freeze then ga_ment_init_set_b("__vel_disabled", true) end
-            if ally   then ga_ment_init_set_i("__team_id_target", 1) end
-            if ttl > 0 then ga_ment_init_set_f("__ttl", ttl * 1.0) end
-            ga_ment_end()
-        end)
-        if ok then spawned = spawned + 1 end
+        local spread = 0
+        if count > 1 then spread = (i - (count + 1) / 2) * 1.5 end
+        local px = off.x + look.x * dist + (-look.z) * spread
+        local py = off.y + look.y * dist
+        local pz = off.z + look.z * dist + look.x * spread
+        local pos = std.vec(px, py, pz)
+        ga_ment_start(level, pos, it.raw)
+        if ga_get_b(E_FREEZE) then ga_ment_init_set_b("__vel_disabled", true) end
+        if ga_get_b(E_ALLY)   then ga_ment_init_set_i("__team_id_target", 1) end
+        if ttl > 0 then ga_ment_init_set_f("__ttl", ttl * 1.0) end
+        ga_ment_end()
+        spawned = spawned + 1
     end
-    if spawned > 0 then
-        ga_hud_msg("spawned " .. spawned .. "x " .. it.raw, 2.0)
-    else
-        ga_hud_msg("spawn FAIL", 3.0)
-    end
+    ga_hud_msg("spawned " .. spawned .. "x " .. it.raw, 2.0)
     ga_play_sound("menu_select")
 end
 
 local function choose_interactable(gi)
     local it = items[gi]
     if it == nil then return end
-    local ok, err = pcall(function()
-        local level = ga_get_viewer_level()
-        local off   = ga_get_viewer_offset()
-        local look  = ga_get_sys_v("game.player.camera.look")
-        local lp    = std.vec(off.x + look.x * 3.0, off.y + look.y * 3.0, off.z + look.z * 3.0)
-        local bp    = std.lp_to_bp(lp)
-        ga_bent_add(level, bp, it.raw, 60.0 * 60.0 * 24.0)
-    end)
-    if ok then
-        ga_hud_msg("placed " .. it.raw, 2.0)
-    else
-        ga_hud_msg("place FAIL: " .. tostring(err), 3.0)
-    end
+    local level = ga_get_viewer_level()
+    local off   = ga_get_viewer_offset()
+    local look  = ga_get_sys_v("game.player.camera.look")
+    local lp    = std.vec(off.x + look.x * 3.0, off.y + look.y * 3.0, off.z + look.z * 3.0)
+    local bp    = std.lp_to_bp(lp)
+    ga_bent_add(level, bp, it.raw, 60.0 * 60.0 * 24.0)
+    ga_hud_msg("placed " .. it.raw, 2.0)
     ga_play_sound("menu_select")
 end
 
@@ -613,40 +599,10 @@ local function choose_teleport(gi)
     if it == nil then return end
     local handle = tonumber(it.raw)
     if handle == nil then return end
-    local ok, err = pcall(function()
-        game_base_wp_system.teleport_target_only(handle)
-    end)
-    if ok then
-        ga_hud_msg("warping to " .. it.label, 2.0)
-        ga_window_pop()
-    else
-        ga_hud_msg("warp FAIL: " .. tostring(err), 3.0)
-    end
+    game_base_wp_system.teleport_target_only(handle)
+    ga_hud_msg("warping to " .. it.label, 2.0)
     ga_play_sound("menu_select")
-end
-
-local function try_render_block_mesh(wid, block_name, cx, cy)
-    local ok = pcall(function()
-        ga_win_txt_center(wid, 0.0, " ")
-        ga_render_clear_depth_buffer()
-        local blockscale = 0.05
-        ga_render_push_matrix()
-            ga_render_matrix_translated(cx, cy, 0)
-            ga_render_matrix_frame(
-                std.vec(blockscale * 0.28125, 0.0, 0.0),
-                std.vec(0.0, blockscale * 0.5, 0.0),
-                std.vec(0.0, 0.0, blockscale * 0.28125))
-            ga_render_matrix_rotated(330, std.vec(1, 0, 0))
-            ga_render_matrix_rotated(45, std.vec(0, 1, 0))
-            local suffix = block_name
-            if string.sub(suffix, 1, 4) == "XAR_" then
-                suffix = "block_s"
-            end
-            local mesh = "blockitem" .. string.sub(suffix, 7)
-            ga_render_mesh(mesh)
-        ga_render_pop_matrix()
-    end)
-    return ok
+    ga_window_pop()
 end
 
 local ITEM_BUTTONS = {
@@ -666,14 +622,14 @@ local ITEM_BUTTONS = {
     { section = "ARMOR", var = "xar.player.armor.amount", buttons = {
         { label = "+100",  delta = 100 },
         { label = "+1000", delta = 1000 },
+        { label = "+10000", delta = 10000 },
         { label = "Set 0", value = 0 },
-        { label = "Max",   value = 99999 },
     }},
     { section = "SHIELD", var = "xar.player.shield.amount", buttons = {
         { label = "+100",  delta = 100 },
         { label = "+1000", delta = 1000 },
+        { label = "+1000", delta = 10000 },
         { label = "Set 0", value = 0 },
-        { label = "Max",   value = 99999 },
     }},
     { section = "XP (total)", var = "xar.experience.total", buttons = {
         { label = "+1000 XP", delta = 1000 },
@@ -708,9 +664,11 @@ local BUFF_BUTTONS = {
     }},
     { section = "CHEATS (toggle)", entries = {
         -- engine console toggles; do NOT ga_set_sys_b metagame.cheat.god (READ ONLY = native crash)
+        { label = "Enable cheats",   raw = "cheat hodisclosetov;if $metagame.cheat.enabled void (cheat on)" },
+        { label = "Disable cheats",   raw = "cheat off" },
         { label = "God Mode",   raw = "god" },
         { label = "Noclip/Fly", raw = "noclip" },
-        { label = "Shrink Any", raw = "shrinkany" },
+        { label = "ShrinkAny", raw = "shrinkany" },
     }},
 }
 
@@ -720,7 +678,7 @@ local GUN_UPGRADE_SUFFIXES = {
 }
 
 local function set_var_if_exists(var, value)
-    if ga_exists(var) then pcall(ga_set_i, var, value) end
+    if ga_exists(var) then ga_set_i(var, value) end
 end
 
 local function gun_prefix() return "xar.player.gun" .. sel_weapon .. "." end
@@ -738,20 +696,21 @@ local function set_sel_upgrades(value)
 end
 
 local function equip_sel()
-    pcall(ga_set_i, "xar.player.cur_wep", sel_weapon)
+    ga_set_i("xar.player.cur_wep", sel_weapon)
     set_build_mode(false)
     ga_hud_msg("equipped weapon " .. sel_weapon, 1.5)
 end
 
 local WEP_ACTION_ROWS = {
     { header = "AMMO (selected weapon)", buttons = {
-        { label = "Max Ammo",    fn = function() set_sel_ammo(9999) end },
+        { label = "Max Ammo",    fn = function() set_sel_ammo(game_wep_modes.get_ammo_max(sel_weapon)) end },
         { label = "Refill 999",  fn = function() set_sel_ammo(999) end },
         { label = "Empty Ammo",  fn = function() set_sel_ammo(0) end },
     }},
     { header = "UPGRADES (selected weapon)", buttons = {
         { label = "Upgrades 100",   fn = function() set_sel_upgrades(100) end },
-        { label = "Upgrades MAX",   fn = function() set_sel_upgrades(1000) end },
+        { label = "Upgrades 1000",   fn = function() set_sel_upgrades(1000) end },
+        { label = "Upgrades 10000",   fn = function() set_sel_upgrades(10000) end },
         { label = "Remove Upgrades",fn = function() set_sel_upgrades(0) end },
     }},
     { header = "EQUIP", buttons = {
@@ -870,13 +829,13 @@ function p.__process_input(wid)
         end
 
         if cur_tab == TAB_BLOCKS then
-            local ok_rclick, rclick = pcall(ga_win_mouse_pressed, wid, false)
+            local ok_rclick, rclick = ga_win_mouse_pressed(wid, false)
             if ok_rclick and rclick then
                 local cursor = ga_win_get_cursor_pos(wid)
                 local gi = hovered_index(cursor)
                 if gi >= 1 and items[gi] then
                     local was = fav_toggle(items[gi].raw)
-                    ga_hud_msg(was and ("★ Favorited: " .. items[gi].label) or ("Unfavorited: " .. items[gi].label), 1.5)
+                    ga_hud_msg(was and ("Favorited: " .. items[gi].label) or ("Unfavorited: " .. items[gi].label), 1.5)
                     ga_play_sound("menu_select")
                 end
             end
@@ -975,103 +934,90 @@ function p.__process_input(wid)
                 sort_mode = "NAME"; rebuild(wid); ga_play_sound("menu_select")
             end
             sx = sx + sw + 0.005
-            if btn_rect(cursor, sx, sy, sw + 0.02, sh) then
-                sort_mode = "CATEGORY"; rebuild(wid); ga_play_sound("menu_select")
+            if btn_rect2(cursor, sx, sy, sw + 0.02, sh) then
+                sort_mode = "CATEGORY"
+                rebuild(wid)
             end
 
             local bx = 0.52
             local bw = 0.060
-            if btn_rect(cursor, bx, sy, bw, sh) then
-                pcall(ga_set_s, BR_SHAPE, "single"); pcall(ga_set_i, BR_SIZE, 0); ga_play_sound("menu_select")
+            if btn_rect2(cursor, bx, sy, bw, sh) then
+                ga_set_s(BR_SHAPE, "single")
+                ga_set_i(BR_SIZE, 0)
             end
             bx = bx + bw + 0.005
-            if btn_rect(cursor, bx, sy, bw, sh) then
-                pcall(ga_set_s, BR_SHAPE, "cube"); if geti(BR_SIZE, 0) < 1 then pcall(ga_set_i, BR_SIZE, 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, bx, sy, bw, sh) then
+                ga_set_s(BR_SHAPE, "cube")
+                if ga_get_i(BR_SIZE) < 1 then ga_set_i(BR_SIZE, 1) end
             end
             bx = bx + bw + 0.005
-            if btn_rect(cursor, bx, sy, bw + 0.005, sh) then
-                pcall(ga_set_s, BR_SHAPE, "sphere"); if geti(BR_SIZE, 0) < 1 then pcall(ga_set_i, BR_SIZE, 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, bx, sy, bw + 0.005, sh) then
+                ga_set_s(BR_SHAPE, "sphere")
+                if ga_get_i(BR_SIZE) < 1 then ga_set_i(BR_SIZE, 1) end
             end
 
             local bsx = 0.77
             local bsw = 0.035
-            if btn_rect(cursor, bsx, sy, bsw, sh) then
-                local s = geti(BR_SIZE, 0); if s > 0 then pcall(ga_set_i, BR_SIZE, s - 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, bsx, sy, bsw, sh) then
+                local s = ga_get_i(BR_SIZE)
+                if s > 0 then ga_set_i(BR_SIZE, s - 1) end
             end
             bsx = bsx + bsw + 0.035
-            if btn_rect(cursor, bsx, sy, bsw, sh) then
-                local s = geti(BR_SIZE, 0); if s < 10 then pcall(ga_set_i, BR_SIZE, s + 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, bsx, sy, bsw, sh) then
+                local s = ga_get_i(BR_SIZE)
+                if s < 10 then ga_set_i(BR_SIZE, s + 1) end
             end
 
         elseif cur_tab == TAB_ENTITIES then
             local ex = 0.025
             local ew = 0.030
-            if btn_rect(cursor, ex, sy, ew, sh) then
-                local c = geti(E_COUNT, 1); if c > 1 then pcall(ga_set_i, E_COUNT, c - 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, ex, sy, ew, sh) then
+                local c = ga_get_i(E_COUNT)
+                if c > 1 then ga_set_i(E_COUNT, c - 1) end
             end
             ex = ex + ew + 0.035
-            if btn_rect(cursor, ex, sy, ew, sh) then
-                local c = geti(E_COUNT, 1); if c < 20 then pcall(ga_set_i, E_COUNT, c + 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, ex, sy, ew, sh) then
+                local c = ga_get_i(E_COUNT)
+                if c < 20 then ga_set_i(E_COUNT, c + 1) end
             end
             ex = ex + ew + 0.015
-            if btn_rect(cursor, ex, sy, ew, sh) then
-                local d = geti(E_DIST, 4); if d > 1 then pcall(ga_set_i, E_DIST, d - 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, ex, sy, ew, sh) then
+                local d = ga_get_i(E_DIST)
+                if d > 1 then ga_set_i(E_DIST, d - 1) end
             end
             ex = ex + ew + 0.035
-            if btn_rect(cursor, ex, sy, ew, sh) then
-                local d = geti(E_DIST, 4); if d < 50 then pcall(ga_set_i, E_DIST, d + 1) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, ex, sy, ew, sh) then
+                local d = ga_get_i(E_DIST)
+                if d < 50 then ga_set_i(E_DIST, d + 1) end
             end
             ex = ex + ew + 0.015
             local tw = 0.065
-            if btn_rect(cursor, ex, sy, tw, sh) then
-                local f = false; local ok, v = pcall(ga_get_b, E_FREEZE); if ok then f = v end
-                pcall(ga_set_b, E_FREEZE, not f); ga_play_sound("menu_select")
-            end
+            if btn_rect2(cursor, ex, sy, tw, sh) then ga_toggle_b(E_FREEZE) end
             ex = ex + tw + 0.005
-            if btn_rect(cursor, ex, sy, tw, sh) then
-                local a = false; local ok, v = pcall(ga_get_b, E_ALLY); if ok then a = v end
-                pcall(ga_set_b, E_ALLY, not a); ga_play_sound("menu_select")
-            end
+            if btn_rect2(cursor, ex, sy, tw, sh) then ga_toggle_b(E_ALLY) end
             ex = ex + tw + 0.015
-            if btn_rect(cursor, ex, sy, ew, sh) then
-                local t = geti(E_TTL, 0); if t > 0 then pcall(ga_set_i, E_TTL, t - 10) end; ga_play_sound("menu_select")
+            if btn_rect2(cursor, ex, sy, ew, sh) then
+                local t = ga_get_i(E_TTL)
+                if t > 0 then ga_set_i(E_TTL, t - 10) end
             end
             ex = ex + ew + 0.035
-            if btn_rect(cursor, ex, sy, ew, sh) then
-                local t = geti(E_TTL, 0); pcall(ga_set_i, E_TTL, t + 10); ga_play_sound("menu_select")
-            end
+            if btn_rect2(cursor, ex, sy, ew, sh) then ga_set_i_by_delta(E_TTL, 10) end
 
         elseif cur_tab == TAB_TELEPORT then
             local tx = 0.025
             local tw = 0.12
-            if btn_rect(cursor, tx, sy, tw, sh) then
-                if game_base_wp_system and game_base_wp_system.teleport_home then
-                    local ok, err = pcall(game_base_wp_system.teleport_home)
-                    if ok then
-                        ga_hud_msg("Teleporting home...", 2.0)
-                        ga_window_pop()
-                    else
-                        ga_hud_msg("HOME FAIL: " .. tostring(err), 3.0)
-                    end
-                else
-                    ga_hud_msg("Waypoint system unavailable", 2.0)
-                end
-                ga_play_sound("menu_select")
+            if btn_rect2(cursor, tx, sy, tw, sh) then
+                local ok, err = game_base_wp_system.teleport_home()
+                ga_hud_msg("Teleporting home...", 2.0)
+                ga_window_pop()
             end
             tx = tx + tw + 0.01
-            if btn_rect(cursor, tx, sy, tw + 0.02, sh) then
-                local ok, err = pcall(function()
-                    local level = ga_get_viewer_level()
-                    local off   = ga_get_viewer_offset()
-                    local bp    = std.lp_to_bp(off)
-                    ga_bent_add(level, bp, "bent_base_waypoint", 60.0 * 60.0 * 24.0 * 365.0)
-                end)
-                if ok then
-                    ga_hud_msg("Placed waypoint marker at your position", 2.0)
-                else
-                    ga_hud_msg("Place WP FAIL: " .. tostring(err), 3.0)
-                end
-                ga_play_sound("menu_select")
+            if btn_rect2(cursor, tx, sy, tw + 0.02, sh) then
+                local level = ga_get_viewer_level()
+                local off   = ga_get_viewer_offset()
+                local bp    = std.lp_to_bp(off)
+                ga_bent_add(level, bp, "bent_base_waypoint", 60.0 * 60.0 * 24.0 * 365.0)
+                ga_hud_msg("Placed waypoint marker at your position", 2.0)
             end
         end
     end
@@ -1172,7 +1118,7 @@ function render_control_strip_blocks(wid)
     bx = bx + bw + 0.005
     small_btn(wid, cursor, bx, sy, bw + 0.005, sh, "SPHERE", cur_shape == "sphere")
 
-    local cur_size = geti(BR_SIZE, 0)
+    local cur_size = ga_get_i(BR_SIZE)
     ga_win_set_char_size(wid, 0.007, 0.014)
     ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
     ga_win_txt(wid, 0.77, sy + sh + 0.008, "SIZE")
@@ -1210,7 +1156,7 @@ function render_control_strip_entities(wid)
     small_btn(wid, cursor, ex, sy, ew, sh, "-", false)
     ga_win_set_char_size(wid, 0.010, 0.020)
     ga_win_set_front_color(wid, std.vec(1, 1, 1))
-    ga_win_txt(wid, ex + ew + 0.008, sy + sh * 0.5 - 0.008, tostring(geti(E_COUNT, 1)))
+    ga_win_txt(wid, ex + ew + 0.008, sy + sh * 0.5 - 0.008, tostring(ga_get_i(E_COUNT)))
     ga_win_set_front_color_default(wid)
     ex = ex + ew + 0.035
     small_btn(wid, cursor, ex, sy, ew, sh, "+", false)
@@ -1223,14 +1169,14 @@ function render_control_strip_entities(wid)
     small_btn(wid, cursor, ex, sy, ew, sh, "-", false)
     ga_win_set_char_size(wid, 0.010, 0.020)
     ga_win_set_front_color(wid, std.vec(1, 1, 1))
-    ga_win_txt(wid, ex + ew + 0.008, sy + sh * 0.5 - 0.008, tostring(geti(E_DIST, 4)))
+    ga_win_txt(wid, ex + ew + 0.008, sy + sh * 0.5 - 0.008, tostring(ga_get_i(E_DIST)))
     ga_win_set_front_color_default(wid)
     ex = ex + ew + 0.035
     small_btn(wid, cursor, ex, sy, ew, sh, "+", false)
     ex = ex + ew + 0.015
 
     local tw = 0.065
-    local freeze = false; local ok_f, vf = pcall(ga_get_b, E_FREEZE); if ok_f then freeze = vf end
+    local freeze = ga_get_b(E_FREEZE)
     ga_win_set_char_size(wid, 0.007, 0.014)
     ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
     ga_win_txt(wid, ex, sy + sh + 0.008, "")
@@ -1238,7 +1184,7 @@ function render_control_strip_entities(wid)
     small_btn(wid, cursor, ex, sy, tw, sh, "FREEZE", freeze)
     ex = ex + tw + 0.005
 
-    local ally = false; local ok_a, va = pcall(ga_get_b, E_ALLY); if ok_a then ally = va end
+    local ally = ga_get_b(E_ALLY)
     small_btn(wid, cursor, ex, sy, tw, sh, "ALLY", ally)
     ex = ex + tw + 0.015
 
@@ -1247,7 +1193,7 @@ function render_control_strip_entities(wid)
     ga_win_txt(wid, ex, sy + sh + 0.008, "TTL(s)")
     ga_win_set_front_color_default(wid)
     small_btn(wid, cursor, ex, sy, ew, sh, "-", false)
-    local ttl_val = geti(E_TTL, 0)
+    local ttl_val = ga_get_i(E_TTL)
     ga_win_set_char_size(wid, 0.010, 0.020)
     ga_win_set_front_color(wid, std.vec(1, 1, 1))
     ga_win_txt(wid, ex + ew + 0.008, sy + sh * 0.5 - 0.008, ttl_val == 0 and "INF" or tostring(ttl_val))
@@ -1283,9 +1229,7 @@ function render_wep_buttons(wid)
 
     ga_win_set_char_size(wid, 0.013, 0.026)
     ga_win_set_front_color(wid, std.vec(0.4, 0.9, 1.0))
-    local ammo_txt = ""
-    local ok_a, a = pcall(ga_get_i, "xar.player.gun" .. sel_weapon .. ".ammo")
-    if ok_a then ammo_txt = "   (ammo: " .. tostring(a) .. ")" end
+    local ammo_txt = "   (ammo: " .. ga_get_i("xar.player.gun" .. sel_weapon .. ".ammo") .. ")"
     ga_win_txt(wid, 0.06, WEP_BTN_Y0 + 0.035, "Editing Weapon " .. sel_weapon .. ammo_txt .. "  (click a weapon above to switch)")
     ga_win_set_front_color_default(wid)
 
@@ -1299,7 +1243,7 @@ function render_wep_buttons(wid)
         function(b, bx, by, bw, bh)
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.45, 0.35, 0.20) or std.vec(0.28, 0.22, 0.13)
-            local padding = 0.002
+            local padding = default_padding
             ga_win_quad_color(wid, bx - fix_charw(padding), by - bh - padding, bx + bw + fix_charw(padding), by + padding, std.vec(0.5, 0.4, 0.2))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_char_size(wid, 0.010, 0.020)
@@ -1342,6 +1286,8 @@ function render_grid_tab(wid, mode)
             end
             if tex ~= "" then
                 ga_win_quad(wid, minx, miny, maxx, maxy, tex)
+            elseif mode == "weapon" then
+                ga_win_quad(wid, minx, miny, maxx, maxy, "ammo_gun"..(gi-1))
             else
                 local c = it.col
                 if is_hov then c = std.vec(0.85, 0.85, 0.95) end
@@ -1351,19 +1297,19 @@ function render_grid_tab(wid, mode)
 
             if is_hov or is_sel then
                 local fcol = is_sel and std.vec(1.0, 0.9, 0.2) or std.vec(1.0, 1.0, 1.0)
-                local t = 0.0035
+                local t = 0.004
                 ga_win_quad_color(wid, minx, maxy - t, maxx, maxy, fcol)
                 ga_win_quad_color(wid, minx, miny, maxx, miny + t, fcol)
-                ga_win_quad_color(wid, minx, miny, minx + t, maxy, fcol)
-                ga_win_quad_color(wid, maxx - t, miny, maxx, maxy, fcol)
+                ga_win_quad_color(wid, minx, miny, minx + fix_padding(t), maxy, fcol)
+                ga_win_quad_color(wid, maxx - fix_padding(t), miny, maxx, maxy, fcol)
             end
 
-            if mode == "weapon" then
-                ga_win_set_char_size(wid, 0.012, 0.024)
-                ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
-                ga_win_txt(wid, minx + (maxx - minx) * 0.5 - 0.004, miny + (maxy - miny) * 0.5 - 0.012, tostring(it.raw))
-                ga_win_set_front_color_default(wid)
-            elseif mode == "teleport" then
+            --f mode == "weapon" then
+                --ga_win_set_char_size(wid, 0.012, 0.024)
+                --ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
+                --ga_win_txt(wid, minx + (maxx - minx) * 0.5 - 0.004, miny + (maxy - miny) * 0.5 - 0.012, tostring(it.raw))
+                --ga_win_set_front_color_default(wid)
+            --[[else]]if mode == "teleport" then
                 local max_chars = math.max(1, math.floor((maxx - minx) / 0.008))
                 ga_win_set_char_size(wid, 0.006, 0.012)
                 ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
@@ -1403,9 +1349,7 @@ function render_items_tab(wid)
     for _, section in ipairs(ITEM_BUTTONS) do
         ga_win_set_char_size(wid, 0.011, 0.022)
         ga_win_set_front_color(wid, std.vec(1.0, 0.9, 0.3))
-        local cur_val = 0
-        local ok_val, v = pcall(ga_get_i, section.var)
-        if ok_val then cur_val = v end
+        local cur_val = ga_get_i(section.var)
         ga_win_txt(wid, 0.03, by, section.section .. ": " .. tostring(cur_val))
         ga_win_set_front_color_default(wid)
 
@@ -1417,7 +1361,8 @@ function render_items_tab(wid)
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.4, 0.6, 0.8) or std.vec(0.2, 0.3, 0.4)
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
-            ga_win_quad_color(wid, bx - 0.002, by - bh - 0.002, bx + bw + 0.002, by + 0.002, std.vec(0.35, 0.35, 0.5))
+            local padding = default_padding
+            ga_win_quad_color(wid, bx - fix_padding(padding), by - bh - padding, bx + bw + fix_padding(padding), by + padding, std.vec(0.35, 0.35, 0.5))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
             ga_win_txt(wid, bx + 0.005, by - bh + 0.008, b.label)
@@ -1429,11 +1374,9 @@ function render_items_tab(wid)
 
     ga_win_set_char_size(wid, 0.010, 0.020)
     ga_win_set_front_color(wid, std.vec(0.6, 0.8, 1.0))
-    local ok_lv, xp_level = pcall(ga_get_i, "xar.experience.level")
-    local ok_tnl, xp_tnl = pcall(ga_get_i, "xar.experience.to_next_level")
-    if ok_lv and ok_tnl then
-        ga_win_txt(wid, 0.03, by + 0.01, "XP Level: " .. tostring(xp_level) .. "   To Next: " .. tostring(xp_tnl))
-    end
+    local xp_level = ga_get_i("xar.experience.level")
+    local xp_tnl = ga_get_i("xar.experience.to_next_level")
+    ga_win_txt(wid, 0.03, by + 0.01, "XP Level: " .. tostring(xp_level) .. "   To Next: " .. tostring(xp_tnl))
     ga_win_set_front_color_default(wid)
 end
 
@@ -1464,7 +1407,8 @@ function render_buffs_tab(wid)
             end
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
             local col = hovering and std.vec(0.5, 0.4, 0.6) or std.vec(0.25, 0.20, 0.30)
-            ga_win_quad_color(wid, bx - 0.002, by - bh - 0.002, bx + bw + 0.002, by + 0.002, std.vec(0.40, 0.30, 0.50))
+            local padding = default_padding
+            ga_win_quad_color(wid, bx - fix_padding(padding), by - bh - padding, bx + bw + fix_padding(padding), by + padding, std.vec(0.40, 0.30, 0.50))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
             ga_win_txt(wid, bx + 0.004, by - bh + 0.007, e.label)
@@ -1500,15 +1444,14 @@ function render_buffs_tab(wid)
         ga_win_txt(wid, 0.03, timer_y, "GOD MODE: ON")
     else
         ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
-        ga_win_txt(wid, 0.03, timer_y, "God Mode: OFF")
+        ga_win_txt(wid, 0.03, timer_y, "GOD MODE: OFF")
     end
     ga_win_set_front_color_default(wid)
 end
 
 function p.uncrash__info()
-    return uncrash.info{
+    local out = uncrash.info {
         local_funcs={
-            screen_aspect=screen_aspect,
             compute_grid=compute_grid,
             clean_name=clean_name,
             clean_ent_name=clean_ent_name,
@@ -1516,4 +1459,10 @@ function p.uncrash__info()
             -- more!!!
         }
     }
+    compute_grid=out.compute_grid
+    clean_name=out.clean_name
+    clean_ent_name=out.clean_ent_name
+    category_of=out.category_of
 end
+
+-- why is this window file 1.5k lines
