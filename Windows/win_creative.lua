@@ -522,7 +522,7 @@ local function set_build_mode(on)
     if on then
         ga_command('bind MOUSE2.downup tocommand "creative_break"')
         ga_command('bind MOUSE1.downup tocommand "creative_place"')
-        ga_hud_msg("Build: ON  (L break / R place)", 2.0)
+        ga_hud_msg("Build: ON  (R break / L place)", 2.0)
     else
         ga_command('bind MOUSE1.downup tocommands "use_equipped primary start" "use_equipped primary stop"')
         ga_command('bind MOUSE2.downup tocommands "use_equipped secondary start" "use_equipped secondary stop"')
