@@ -1,13 +1,13 @@
-local SEL_VAR  = "creative.selected_block"
-local MODE_VAR = "creative.build_mode"
+local SEL_VAR  = "temp.creative.selected_block"
+local MODE_VAR = "temp.creative.build_mode"
 local AIR      = "block_e"
 
 local function ensure_vars()
     ga_init_s(SEL_VAR, "")
     ga_init_b(MODE_VAR, false)
-    ga_init_s("creative.brush_shape", "single")
-    ga_init_i("creative.brush_size", 0)
-    ga_init_s("creative.wp_search", "")
+    ga_init_s("temp.creative.brush_shape", "single")
+    ga_init_i("temp.creative.brush_size", 0)
+    ga_init_s("temp.creative.wp_search", "")
 end
 
 local function selected() return ga_get_s(SEL_VAR) end
@@ -84,8 +84,8 @@ end
 local BRUSH_CELL_CAP = 4096
 
 local function brush_cells(center)
-    local shape = ga_get_s("creative.brush_shape")
-    local size  = ga_get_i("creative.brush_size")
+    local shape = ga_get_s("temp.creative.brush_shape")
+    local size  = ga_get_i("temp.creative.brush_size")
     if shape == nil or shape == "" then shape = "single" end
     if size == nil or size < 0 then size = 0 end
     if shape == "single" or size == 0 then return { center } end
@@ -228,7 +228,7 @@ function p.handler_wp_home(str)
 end
 
 function p.handler_wp_warp(str)
-    local pat = ga_get_s("creative.wp_search")
+    local pat = ga_get_s("temp.creative.wp_search")
     if pat == "" then
         ga_hud_msg("Warp: type a waypoint name in the menu first", 2.5)
         return
@@ -311,7 +311,7 @@ local function register()
     game_command_system.add_command("creative_wp_home", p.handler_wp_home)
     game_command_system.add_help("creative_wp_home", "Teleport to your EMERGENCY waypoint.")
     game_command_system.add_command("creative_wp_warp", p.handler_wp_warp)
-    game_command_system.add_help("creative_wp_warp", "Warp to the first waypoint matching creative.wp_search.")
+    game_command_system.add_help("creative_wp_warp", "Warp to the first waypoint matching temp.creative.wp_search.")
 end
 
 function p.__load_game()
