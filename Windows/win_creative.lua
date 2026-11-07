@@ -3,8 +3,8 @@ local std_aspect = 16/9
 
 -- important: width of ga_win_txt = len_txt*char_width
 
-local SEL_VAR  = "creative.selected_block"
-local MODE_VAR = "creative.build_mode"
+local SEL_VAR  = "temp.creative.selected_block"
+local MODE_VAR = "temp.creative.build_mode"
 
 local TAB_BLOCKS   = 1
 local TAB_WEAPONS  = 2
@@ -15,14 +15,14 @@ local TAB_INTERACT = 6
 local TAB_TELEPORT = 7
 local TAB_COUNT    = 7
 
-local FAV_VAR   = "creative.favorites"
-local REC_VAR   = "creative.recents"
-local WP_VAR    = "creative.wp_search"
-local BR_SHAPE  = "creative.brush_shape"
-local BR_SIZE   = "creative.brush_size"
+local FAV_VAR   = "temp.creative.favorites"
+local REC_VAR   = "temp.creative.recents"
+local WP_VAR    = "temp.creative.wp_search"
+local BR_SHAPE  = "temp.creative.brush_shape"
+local BR_SIZE   = "temp.creative.brush_size"
 local E_COUNT, E_DIST, E_FREEZE, E_ALLY, E_TTL =
-    "creative.ent_count", "creative.ent_dist", "creative.ent_freeze",
-    "creative.ent_ally", "creative.ent_ttl"
+    "temp.creative.ent_count", "temp.creative.ent_dist", "temp.creative.ent_freeze",
+    "temp.creative.ent_ally", "temp.creative.ent_ttl"
 
 local X0, Y0     = 0.025, 0.78
 local GRID_W     = 0.95

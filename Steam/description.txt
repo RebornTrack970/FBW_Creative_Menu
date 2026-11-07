@@ -1,0 +1,28 @@
+A Minecraft-style creative inventory for Xar.
+
+"If it works, it works ig." -RT
+
+[b]Controls[/b]
+[list]
+[*][b]G[/b] - open the Creative Menu
+[*][b]V[/b] - toggle build mode (mouse buttons place / break the block you look at)
+[*][b]C[/b] or [b]middle mouse[/b] - eyedropper (pick the block you look at)
+[*][b]Backspace[/b] (hold) - undo place / break / brush
+[*][b]F6[/b] - warp to the waypoint matching your teleport search
+[*][b]F7[/b] - teleport to your emergency waypoint
+[/list]
+
+[b]Tabs[/b]
+[list]
+[*][b]Blocks[/b] - every Xar block, with search, favorites, recents, and cube/sphere brushes (size 1-10). Blocks known to crash the game are hidden.
+[*][b]Weapons[/b] - equip any gun, max/refill/empty ammo, set upgrades
+[*][b]Items[/b] - gold, health, armor, shield, XP
+[*][b]Buffs[/b] - keys, timed powerups (5x damage, invulnerability, 5x XP), god mode, noclip, shrink-anywhere
+[*][b]Entities[/b] - spawn monsters where you look (count, distance, frozen, ally, lifetime)
+[*][b]Interact[/b] - spawn shops, save points, respawn points, waypoints, and more
+[*][b]Teleport[/b] - search and warp to your waypoints
+[/list]
+
+This is a mod for [b]xar[/b]. Enable it under Menu > Mods > Select Mods.
+
+Source: https://github.com/RebornTrack970/FBW_Creative_Menu
