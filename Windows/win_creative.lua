@@ -13,7 +13,8 @@ local TAB_BUFFS    = 4
 local TAB_ENTITIES = 5
 local TAB_INTERACT = 6
 local TAB_TELEPORT = 7
-local TAB_COUNT    = 7
+local TAB_DECOR    = 8
+local TAB_COUNT    = 8
 
 local FAV_VAR   = "temp.creative.favorites"
 local REC_VAR   = "temp.creative.recents"
@@ -23,6 +24,8 @@ local BR_SIZE   = "temp.creative.brush_size"
 local E_COUNT, E_DIST, E_FREEZE, E_ALLY, E_TTL =
     "temp.creative.ent_count", "temp.creative.ent_dist", "temp.creative.ent_freeze",
     "temp.creative.ent_ally", "temp.creative.ent_ttl"
+local D_SIZE, D_DIST, D_SNAP =
+    "temp.creative.decor_size", "temp.creative.decor_dist", "temp.creative.decor_snap"
 
 local X0, Y0     = 0.025, 0.78
 local GRID_W     = 0.95
@@ -126,6 +129,7 @@ local TEX_FALLBACK_PREFIXES = {
     "gold_", "health_", "armor_", "ammo_", "sleep", "pay_", "black_", "arcade_",
     "genesis_", "cheap_", "invun", "damage_", "xp", "shield", "spice", "trophy",
     "icarus", "secret_", "marker_", "WhiteBox", "YellowBox", "Drop", "icon_", "pic_",
+    "picture_",
 }
 
 local function norm_key(s)
@@ -233,6 +237,42 @@ end
 
 local function valid_tex(name)
     return ntex(name) or ""
+end
+
+-- Draws a square texture icon with bottom-left at (x, y) and height h; width is
+-- aspect-corrected so it stays square. Unknown textures are skipped (returns 0),
+-- so a renamed game texture can never break the menu. Returns the drawn width.
+local function draw_icon(wid, x, y, h, name, framed)
+    local tex = ntex(name)
+    if tex == nil then return 0 end
+    local w = h / aspect
+    if framed then
+        local f = 0.002
+        ga_win_quad_color(wid, x - f / aspect, y - f, x + w + f / aspect, y + h + f, std.vec(0.0, 0.0, 0.0))
+    end
+    ga_win_quad(wid, x, y, x + w, y + h, tex)
+    return w
+end
+
+local TABS = {
+    { label = "BLOCKS",   icon = "block_cube_1" },
+    { label = "WEAPONS",  icon = "ammo_gun1" },
+    { label = "ITEMS",    icon = "icon_gold" },
+    { label = "BUFFS",    icon = "icon_damage_5x" },
+    { label = "ENTITIES", icon = "MonsterGoblin" },
+    { label = "INTERACT", icon = "buy_station" },
+    { label = "TELEPORT", icon = "bent_bookmark" },
+    { label = "DECOR",    icon = "trophy_jumbo_yellow_flower" },
+}
+-- bottom bar: close button sits centred above the key-hint line
+local CLOSE_Y, CLOSE_CW, CLOSE_TXT = 0.040, 0.011, "Close (ESC)"
+local TAB_Y, TAB_H              = 0.884, 0.048
+local TAB_X0, TAB_X1, TAB_GAP   = 0.02, 0.98, 0.006
+
+
+local function tab_rect(i)
+    local w = (TAB_X1 - TAB_X0 - TAB_GAP * (TAB_COUNT - 1)) / TAB_COUNT
+    return TAB_X0 + (i - 1) * (w + TAB_GAP), TAB_Y, w, TAB_H
 end
 
 local function enum_names(fn, prefix)
@@ -373,6 +413,8 @@ end
 
 local function gets(var, d) local v = ga_get_s(var); if type(v) == "string" and v ~= "" then return v end return d end
 
+local rebuild_decor -- defined with the DECOR tab code below
+
 local function rebuild(wid)
     items = {}
     local search = ""
@@ -442,7 +484,7 @@ local function rebuild(wid)
         if #names == 0 then names = enum_names(ga_get_ment_names_with_prefix, "ment_") end
         for _, ent in ipairs(names) do
             local match = (search == "") or string.find(string.upper(ent), search, 1, true)
-            if match then
+            if match and string.sub(ent, 1, 13) ~= "ment_picture_" then
                 items[#items + 1] = { raw = ent, label = clean_ent_name(ent), cat = "ENT", col = std.vec(0.30, 0.20, 0.35) }
             end
         end
@@ -462,6 +504,9 @@ local function rebuild(wid)
                 }
             end
         end
+
+    elseif cur_tab == TAB_DECOR then
+        rebuild_decor(search)
 
     elseif cur_tab == TAB_TELEPORT then
         if game_base_wp_system and game_base_wp_system.get_wps_filtered then
@@ -605,70 +650,291 @@ local function choose_teleport(gi)
     ga_window_pop()
 end
 
+-------------------------------------------------------------------------------
+-- DECOR tab: pictures + trophies
+--
+-- Pictures are xar's ment_picture_* ments. Their mesh defaults to block_black;
+-- world gen (native code) sets __tex_override to a picture_* texture, so we do
+-- the same. The mesh is a thin box in its XZ plane, textured on its -Y face
+-- (U = +X, V = +Z). __mesh_fixed_frame_v1/v2/v3 are the world directions of
+-- the mesh X/Y/Z axes (FBW.exe Frame::OpenGLRotate), world up is +Z.
+--
+-- Trophies are the block block_xar_trophy with block var api_name; touching
+-- it calls game_trophy.pickup(api_name). Every regular trophy has a matching
+-- trophy_<api_name> texture, which is how we list them. Secret trophies are
+-- bent_secret_trophy with a string param (st_* name).
+-------------------------------------------------------------------------------
+
+local function set_of(t) local o = {} for _, v in ipairs(t) do o[v] = true end return o end
+
+-- picture_* textures that are not square (measured from the image files)
+local PIC_WIDE = set_of{
+    "picture_old_house", "picture_dragon", "picture_keiths", "picture_belle_rosette",
+    "picture_tau_caves", "picture_inf2_1", "picture_inf2_2", "picture_inf2_3",
+    "picture_inf2_4", "picture_inf2_5", "picture_inf2_6", "picture_inf2_7",
+    "picture_inf2_8", "picture_petroglyphs", "picture_block_arena_1", "picture_block_arena_2",
+}
+local PIC_TALL = set_of{
+    "picture_flower_girl", "picture_cred_dan", "picture_cred_bruce", "picture_cred_joan",
+    "picture_cred_jon", "picture_cred_tegan", "picture_cred_zach", "picture_orange",
+    "picture_base_camp", "picture_portal_back_to_i2", "picture_corn_maze", "picture_cot_ophelia",
+    "picture_cot_spring_high", "picture_cot_spring", "picture_m_to_omega",
+}
+
+local DECOR_SIZES = {
+    { label = "S",  scale = 0.6 },
+    { label = "M",  scale = 1.0 },
+    { label = "L",  scale = 1.8 },
+    { label = "XL", scale = 3.0 },
+}
+local decor_view = "ALL"
+
+local function nice_name(s)
+    s = string.gsub(s, "_", " ")
+    return string.upper(string.sub(s, 1, 1)) .. string.sub(s, 2)
+end
+
+local function secret_trophy_names()
+    local out = {}
+    if game_secret_trophy and game_secret_trophy.get_all then
+        local ok, all = pcall(game_secret_trophy.get_all)
+        if ok and type(all) == "table" then
+            for k, _ in pairs(all) do
+                if type(k) == "string" then out[#out + 1] = k end
+            end
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+rebuild_decor = function(search)
+    ensure_tex_set()
+    local pics, trophies = {}, {}
+    for nm, _ in pairs(tex_set) do
+        if string.sub(nm, 1, 8) == "picture_" then
+            pics[#pics + 1] = nm
+        elseif string.sub(nm, 1, 7) == "trophy_" and nm ~= "trophy_do_not_have" then
+            trophies[#trophies + 1] = nm
+        end
+    end
+    table.sort(pics)
+    table.sort(trophies)
+
+    local function add(it)
+        local hay = string.upper(it.label .. " " .. it.raw)
+        if search == "" or string.find(hay, search, 1, true) then items[#items + 1] = it end
+    end
+    if decor_view ~= "TROPHIES" then
+        for _, nm in ipairs(pics) do
+            add({ raw = nm, kind = "picture", tex = nm, cat = "PIC",
+                  label = "Picture: " .. nice_name(string.sub(nm, 9)), col = std.vec(0.2, 0.2, 0.2) })
+        end
+    end
+    if decor_view ~= "PICTURES" then
+        for _, nm in ipairs(trophies) do
+            local api = string.sub(nm, 8)
+            add({ raw = api, kind = "trophy", tex = nm, cat = "TROPHY",
+                  label = "Trophy: " .. nice_name(api), col = std.vec(0.3, 0.25, 0.1) })
+        end
+        for _, st in ipairs(secret_trophy_names()) do
+            add({ raw = st, kind = "secret", tex = "secret_trophy", cat = "SECRET",
+                  label = "Secret trophy: " .. nice_name(string.gsub(st, "^st_", "")), col = std.vec(0.3, 0.1, 0.3) })
+        end
+    end
+end
+
+-- point in front of the camera, dist units away
+local function point_ahead(dist)
+    local off  = ga_get_viewer_offset()
+    local look = ga_get_sys_v("game.player.camera.look")
+    return std.vec(off.x + look.x * dist, off.y + look.y * dist, off.z + look.z * dist), look
+end
+
+local function decor_dist()
+    local d = ga_get_i(D_DIST)
+    if d < 1 then d = 1 end
+    if d > 60 then d = 60 end
+    return d
+end
+
+local function place_picture(it)
+    local level = ga_get_viewer_level()
+    local pos, look = point_ahead(decor_dist())
+
+    -- face the player: mesh +Y (viewing direction) = horizontal look
+    local fx, fy = look.x, look.y
+    local len = math.sqrt(fx * fx + fy * fy)
+    if ga_get_b(D_SNAP) or len < 0.0001 then
+        if math.abs(fx) >= math.abs(fy) then
+            fx, fy = (fx >= 0) and 1 or -1, 0
+        else
+            fx, fy = 0, (fy >= 0) and 1 or -1
+        end
+    else
+        fx, fy = fx / len, fy / len
+    end
+
+    local mtype, base = "ment_picture_5", 3.6
+    if PIC_WIDE[it.raw] then mtype, base = "ment_picture_9_5", 6.0
+    elseif PIC_TALL[it.raw] then mtype, base = "ment_picture_5_9", 5.2 end
+    local size = DECOR_SIZES[ga_get_i(D_SIZE)] or DECOR_SIZES[2]
+
+    ga_ment_start(level, pos, mtype)
+    ga_ment_init_set_s("__tex_override", it.raw)
+    ga_ment_init_set_f("__radius", base * size.scale)
+    ga_ment_init_set_v("__mesh_fixed_frame_v1", std.vec(fy, -fx, 0.0))
+    ga_ment_init_set_v("__mesh_fixed_frame_v2", std.vec(fx, fy, 0.0))
+    ga_ment_init_set_v("__mesh_fixed_frame_v3", std.vec(0.0, 0.0, 1.0))
+    -- the picture types are world-gen props (unsaved, 1h ttl); make ours stay
+    ga_ment_init_set_b("__disable_saving", false)
+    ga_ment_init_set_f("__ttl", 60.0 * 60.0 * 24.0 * 365.0 * 100.0)
+    ga_ment_end()
+    ga_hud_msg("placed " .. it.label, 2.0)
+end
+
+local function place_trophy(it)
+    local level = ga_get_viewer_level()
+    local bp = std.lp_to_bp((point_ahead(decor_dist())))
+    if it.kind == "secret" then
+        ga_bent_add_s(level, bp, "bent_secret_trophy", it.raw, 60.0 * 60.0 * 24.0 * 365.0)
+    else
+        ga_block_change_perm(level, bp, "block_xar_trophy")
+        ga_block_set_s(level, bp, "api_name", it.raw)
+    end
+    ga_hud_msg("placed " .. it.label .. "  (touch = collect)", 2.5)
+end
+
+local function remove_pictures_near_crosshair()
+    if not ga_ment_sphere_query then return end
+    local level = ga_get_viewer_level()
+    local pos = point_ahead(decor_dist())
+    local found = ga_ment_sphere_query(level, level - 5, level, pos, 8.0)
+    local n = 0
+    if type(found) == "table" then
+        for _, v in pairs(found) do
+            local id = v.inst_id
+            local t = id and ga_ment_get_type(id)
+            if type(t) == "string" and string.sub(t, 1, 13) == "ment_picture_" then
+                ga_ment_remove(id)
+                n = n + 1
+            end
+        end
+    end
+    ga_hud_msg("removed " .. n .. " picture(s) near crosshair", 2.0)
+end
+
+local function choose_decor(gi)
+    local it = items[gi]
+    if it == nil then return end
+    if it.kind == "picture" then place_picture(it) else place_trophy(it) end
+    ga_play_sound("menu_select")
+end
+
+-- DECOR control strip: one layout shared by render + input
+local function decor_strip_layout(cb)
+    local sy, sh = 0.095, 0.035
+    local x = 0.025
+    local function btn(id, w, label, active, group)
+        cb(id, x, sy, w, sh, label, active, group)
+        x = x + w + 0.005
+    end
+    btn("v_all",   0.050, "ALL",      decor_view == "ALL",      "VIEW")
+    btn("v_pics",  0.090, "PICTURES", decor_view == "PICTURES", nil)
+    btn("v_troph", 0.090, "TROPHIES", decor_view == "TROPHIES", nil)
+    x = x + 0.020
+    local cur = ga_get_i(D_SIZE)
+    for i, s in ipairs(DECOR_SIZES) do
+        btn("size" .. i, 0.032, s.label, cur == i, i == 1 and "PIC SIZE" or nil)
+    end
+    x = x + 0.020
+    btn("d_minus", 0.030, "-", false, "DIST")
+    cb("d_val", x, sy, 0.030, sh, tostring(decor_dist()), false, nil)
+    x = x + 0.035
+    btn("d_plus",  0.030, "+", false, nil)
+    x = x + 0.020
+    btn("snap",    0.070, "SNAP", ga_get_b(D_SNAP), "FACING")
+    x = x + 0.020
+    btn("remove",  0.190, "REMOVE PICS HERE", false, nil)
+end
+
+local function decor_strip_click(id)
+    if id == "v_all" then decor_view = "ALL"
+    elseif id == "v_pics" then decor_view = "PICTURES"
+    elseif id == "v_troph" then decor_view = "TROPHIES"
+    elseif string.sub(id, 1, 4) == "size" then ga_set_i(D_SIZE, tonumber(string.sub(id, 5)) or 2)
+    elseif id == "d_minus" then ga_set_i(D_DIST, math.max(1, decor_dist() - 1))
+    elseif id == "d_plus" then ga_set_i(D_DIST, math.min(60, decor_dist() + 1))
+    elseif id == "snap" then ga_toggle_b(D_SNAP)
+    elseif id == "remove" then remove_pictures_near_crosshair()
+    else return false end
+    return true
+end
+
 local ITEM_BUTTONS = {
-    { section = "GOLD", var = "xar.player.gold.amount", buttons = {
+    { section = "GOLD", icon = "icon_gold", var = "xar.player.gold.amount", buttons = {
         { label = "+1K",   delta = 1000 },
         { label = "+10K",  delta = 10000 },
         { label = "+100K", delta = 100000 },
         { label = "Set 0", value = 0 },
         { label = "Max",   value = 1000000 },
     }},
-    { section = "HEALTH", var = "xar.player.health.amount", buttons = {
+    { section = "HEALTH", icon = "icon_health", var = "xar.player.health.amount", buttons = {
         { label = "+100",  delta = 100 },
         { label = "+1000", delta = 1000 },
         { label = "Set 1", value = 1 },
         { label = "Max",   value = 99999 },
     }},
-    { section = "ARMOR", var = "xar.player.armor.amount", buttons = {
+    { section = "ARMOR", icon = "icon_armor", var = "xar.player.armor.amount", buttons = {
         { label = "+100",  delta = 100 },
         { label = "+1000", delta = 1000 },
         { label = "+10000", delta = 10000 },
         { label = "Set 0", value = 0 },
     }},
-    { section = "SHIELD", var = "xar.player.shield.amount", buttons = {
+    { section = "SHIELD", icon = "icon_shield", var = "xar.player.shield.amount", buttons = {
         { label = "+100",  delta = 100 },
         { label = "+1000", delta = 1000 },
-        { label = "+1000", delta = 10000 },
+        { label = "+10000", delta = 10000 },
         { label = "Set 0", value = 0 },
     }},
-    { section = "XP (total)", var = "xar.experience.total", buttons = {
+    { section = "XP (total)", icon = "xp", var = "xar.experience.total", buttons = {
         { label = "+1000 XP", delta = 1000 },
         { label = "+10000 XP", delta = 10000 },
     }},
 }
 
 local BUFF_BUTTONS = {
-    { section = "KEYS", entries = {
-        { label = "Yellow Key 30s",  cmd = "f xar.key_time.yellow 30" },
-        { label = "Yellow Key 300s", cmd = "f xar.key_time.yellow 300" },
-        { label = "Blue Key 30s",    cmd = "f xar.key_time.blue 30" },
-        { label = "Blue Key 300s",   cmd = "f xar.key_time.blue 300" },
-        { label = "Green Key 30s",   cmd = "f xar.key_time.green 30" },
-        { label = "Green Key 300s",  cmd = "f xar.key_time.green 300" },
-        { label = "Universe Key 30s",cmd = "f xar.key_time.universe 30" },
-        { label = "Universe Key 300s",cmd = "f xar.key_time.universe 300" },
-        { label = "Laser Genesis 30s",cmd = "f xar.key_time.laser_genesis 30" },
-        { label = "Dan's House 30s", cmd = "f xar.key_time.dans_house 30" },
-        { label = "ALL Keys 60s",    cmd = "f xar.key_time.yellow 60" },
+    { section = "KEYS", icon = "key_yellow", entries = {
+        { label = "Yellow Key 30s",  icon = "key_yellow", cmd = "f xar.key_time.yellow 30" },
+        { label = "Yellow Key 300s", icon = "key_yellow", cmd = "f xar.key_time.yellow 300" },
+        { label = "Blue Key 30s",    icon = "key_blue", cmd = "f xar.key_time.blue 30" },
+        { label = "Blue Key 300s",   icon = "key_blue", cmd = "f xar.key_time.blue 300" },
+        { label = "Green Key 30s",   icon = "key_green", cmd = "f xar.key_time.green 30" },
+        { label = "Green Key 300s",  icon = "key_green", cmd = "f xar.key_time.green 300" },
+        { label = "Universe Key 30s",icon = "MonsterKeyUniverse", cmd = "f xar.key_time.universe 30" },
+        { label = "Universe Key 300s",icon = "MonsterKeyUniverse", cmd = "f xar.key_time.universe 300" },
+        { label = "Laser Genesis 30s",icon = "key_laser_genesis", cmd = "f xar.key_time.laser_genesis 30" },
+        { label = "Dan's House 30s", icon = "key_dans_house", cmd = "f xar.key_time.dans_house 30" },
+        { label = "ALL Keys 60s",    icon = "key_yellow", cmd = "f xar.key_time.yellow 60" },
     }},
-    { section = "POWERUPS", entries = {
-        { label = "5x Damage 30s",   cmd = "f xar.damage_5x_stacking_time 30" },
-        { label = "5x Damage 120s",  cmd = "f xar.damage_5x_stacking_time 120" },
-        { label = "5x Damage 600s",  cmd = "f xar.damage_5x_stacking_time 600" },
-        { label = "Invulnerable 30s",cmd = "f xar.invun_stacking_time 30" },
-        { label = "Invulnerable 120s",cmd = "f xar.invun_stacking_time 120" },
-        { label = "Invulnerable 600s",cmd = "f xar.invun_stacking_time 600" },
-        { label = "5x XP 30s",       cmd = "f xar.xp_5x_stacking_time 30" },
-        { label = "5x XP 120s",      cmd = "f xar.xp_5x_stacking_time 120" },
-        { label = "5x XP 600s",      cmd = "f xar.xp_5x_stacking_time 600" },
+    { section = "POWERUPS", icon = "icon_damage_5x", entries = {
+        { label = "5x Damage 30s",   icon = "icon_damage_5x", cmd = "f xar.damage_5x_stacking_time 30" },
+        { label = "5x Damage 120s",  icon = "icon_damage_5x", cmd = "f xar.damage_5x_stacking_time 120" },
+        { label = "5x Damage 600s",  icon = "icon_damage_5x", cmd = "f xar.damage_5x_stacking_time 600" },
+        { label = "Invulnerable 30s",icon = "icon_invun", cmd = "f xar.invun_stacking_time 30" },
+        { label = "Invulnerable 120s",icon = "icon_invun", cmd = "f xar.invun_stacking_time 120" },
+        { label = "Invulnerable 600s",icon = "icon_invun", cmd = "f xar.invun_stacking_time 600" },
+        { label = "5x XP 30s",       icon = "icon_xp_5x", cmd = "f xar.xp_5x_stacking_time 30" },
+        { label = "5x XP 120s",      icon = "icon_xp_5x", cmd = "f xar.xp_5x_stacking_time 120" },
+        { label = "5x XP 600s",      icon = "icon_xp_5x", cmd = "f xar.xp_5x_stacking_time 600" },
     }},
-    { section = "CHEATS (toggle)", entries = {
+    { section = "CHEATS (toggle)", icon = "skull", entries = {
         -- engine console toggles; do NOT ga_set_sys_b metagame.cheat.god (READ ONLY = native crash)
-        { label = "Enable cheats",   raw = "cheat hodisclosetov;if $metagame.cheat.enabled void (cheat on)" },
-        { label = "Disable cheats",   raw = "cheat off" },
-        { label = "God Mode",   raw = "god" },
-        { label = "Noclip/Fly", raw = "noclip" },
-        { label = "ShrinkAny", raw = "shrinkany" },
+        { label = "Enable cheats",   icon = "skull", raw = "cheat hodisclosetov;if $metagame.cheat.enabled void (cheat on)" },
+        { label = "Disable cheats",   icon = "crossbones", raw = "cheat off" },
+        { label = "God Mode",   icon = "icon_shield", raw = "god" },
+        { label = "Noclip/Fly", icon = "icon_pacifist", raw = "noclip" },
+        { label = "ShrinkAny", icon = "icon_shrink_warning", raw = "shrinkany" },
     }},
 }
 
@@ -701,36 +967,87 @@ local function equip_sel()
     ga_hud_msg("equipped weapon " .. sel_weapon, 1.5)
 end
 
+local function is_equipped(n) return ga_get_i("xar.player.cur_wep") == n end
+
+local function max_ammo_for_sel()
+    if game_wep_modes and game_wep_modes.get_ammo_max then
+        local ok, v = pcall(game_wep_modes.get_ammo_max, sel_weapon)
+        if ok and type(v) == "number" then return v end
+    end
+    return 999
+end
+
 local WEP_ACTION_ROWS = {
-    { header = "AMMO (selected weapon)", buttons = {
-        { label = "Max Ammo",    fn = function() set_sel_ammo(game_wep_modes.get_ammo_max(sel_weapon)) end },
+    { header = "AMMO", icon = "@sel_ammo", buttons = {
+        { label = "Max Ammo",    fn = function() set_sel_ammo(max_ammo_for_sel()) end },
         { label = "Refill 999",  fn = function() set_sel_ammo(999) end },
         { label = "Empty Ammo",  fn = function() set_sel_ammo(0) end },
     }},
-    { header = "UPGRADES (selected weapon)", buttons = {
-        { label = "Upgrades 100",   fn = function() set_sel_upgrades(100) end },
+    { header = "UPGRADES", icon = "upgrade_station", buttons = {
+        { label = "Upgrades 100",    fn = function() set_sel_upgrades(100) end },
         { label = "Upgrades 1000",   fn = function() set_sel_upgrades(1000) end },
-        { label = "Upgrades 10000",   fn = function() set_sel_upgrades(10000) end },
-        { label = "Remove Upgrades",fn = function() set_sel_upgrades(0) end },
+        { label = "Upgrades 10000",  fn = function() set_sel_upgrades(10000) end },
+        { label = "Remove Upgrades", fn = function() set_sel_upgrades(0) end },
     }},
-    { header = "EQUIP", buttons = {
-        { label = "Equip Selected", fn = equip_sel },
+    { header = "EQUIP", icon = "icon_rocket", buttons = {
+        { label = "Equip Selected", fn = equip_sel, active = function() return is_equipped(sel_weapon) end },
     }},
 }
 
-local WEP_BTN_Y0 = 0.60
+local WEP_NAMES = { [0] = "Dark Hole", "Plasma", "Cannon", "Laser", "Rocket",
+                    "Homing Rocket", "Minigun", "Railgun", "EMP", "Nuke" }
+local function wep_name(n)
+    if game_wep_modes and game_wep_modes.get_wep_name then
+        local ok, nm = pcall(game_wep_modes.get_wep_name, n)
+        if ok and type(nm) == "string" and nm ~= "ERROR" then return nm end
+    end
+    return WEP_NAMES[n] or ("Weapon " .. n)
+end
+
+local function gun_i(n, suffix, default)
+    local var = "xar.player.gun" .. n .. "." .. suffix
+    if ga_exists(var) then return ga_get_i(var) end
+    return default
+end
+
+-- first upgrade var this gun has (the upgrade buttons set them all to the same value)
+local function gun_upgrade_level(n)
+    for _, suf in ipairs(GUN_UPGRADE_SUFFIXES) do
+        local v = gun_i(n, suf, nil)
+        if v ~= nil then return v end
+    end
+    return 0
+end
+
+-- weapon strip: 10 square tiles centred under the tab bar
+local WEP_TILE_H, WEP_TILE_GAP, WEP_TILE_TOP = 0.100, 0.014, 0.780
+local function wep_tile_rect(n)
+    local tw  = WEP_TILE_H / aspect
+    local gap = WEP_TILE_GAP / aspect
+    local x   = 0.5 - (10 * tw + 9 * gap) * 0.5 + n * (tw + gap)
+    return x, WEP_TILE_TOP - WEP_TILE_H, x + tw, WEP_TILE_TOP
+end
+local function wep_hovered(cursor)
+    for n = 0, 9 do
+        local x0, y0, x1, y1 = wep_tile_rect(n)
+        if cursor.x >= x0 and cursor.x <= x1 and cursor.y >= y0 and cursor.y <= y1 then return n end
+    end
+    return -1
+end
+
+-- detail panel rows: label on the left, buttons on the right (same look as the ITEMS cards)
+local WEP_ROW_Y0, WEP_ROW_PITCH = 0.470, 0.080
+local WEP_BTN_X0, WEP_BTN_W, WEP_BTN_H, WEP_BTN_GAP = 0.27, 0.155, 0.035, 0.010
 local function wep_buttons_layout(cb_section, cb_button)
-    local by = WEP_BTN_Y0
+    local by = WEP_ROW_Y0
     for _, row in ipairs(WEP_ACTION_ROWS) do
-        if cb_section then cb_section(row.header, by) end
-        by = by - 0.045
-        local bx = 0.06
-        local bw, bh = 0.20, 0.05
+        if cb_section then cb_section(row, by) end
+        local bx = WEP_BTN_X0
         for _, b in ipairs(row.buttons) do
-            cb_button(b, bx, by, bw, bh)
-            bx = bx + bw + 0.02
+            cb_button(b, bx, by, WEP_BTN_W, WEP_BTN_H)
+            bx = bx + WEP_BTN_W + WEP_BTN_GAP
         end
-        by = by - 0.085
+        by = by - WEP_ROW_PITCH
     end
 end
 
@@ -752,20 +1069,17 @@ function p.init(wid)
     ga_init_b(E_FREEZE, false)
     ga_init_b(E_ALLY, false)
     ga_init_i(E_TTL, 0)
+    ga_init_i(D_SIZE, 2)
+    ga_init_i(D_DIST, 6)
+    ga_init_b(D_SNAP, true)
 
     ga_win_widget_text_input_start(wid, 0.835, fix_charw(0.012), 0.024)
     ga_win_widget_text_input_set_text(wid, "")
     ga_win_widget_text_input_set_enable_enter(wid, false)
 
-    ga_win_widget_button_start(wid, 1, 0.01,  0.91, 0.009, 0.018, "BLOCKS")
-    ga_win_widget_button_start(wid, 2, 0.145, 0.91, 0.009, 0.018, "WEAPONS")
-    ga_win_widget_button_start(wid, 3, 0.29,  0.91, 0.009, 0.018, "ITEMS")
-    ga_win_widget_button_start(wid, 4, 0.41,  0.91, 0.009, 0.018, "BUFFS")
-    ga_win_widget_button_start(wid, 5, 0.53,  0.91, 0.009, 0.018, "ENTITIES")
-    ga_win_widget_button_start(wid, 6, 0.68,  0.91, 0.009, 0.018, "INTERACT")
-    ga_win_widget_button_start(wid, 7, 0.83,  0.91, 0.009, 0.018, "TELEPORT")
+    -- tabs are drawn by render_tab_bar() and hit-tested in __process_input
 
-    ga_win_widget_go_back_button_start(wid, 0.03, fix_charw(0.02), 0.04, "Close (ESC)")
+    ga_win_widget_go_back_button_start(wid, CLOSE_Y, fix_charw(CLOSE_CW), 0.022, CLOSE_TXT)
 
     cur_tab = TAB_BLOCKS
     last_tab = -1
@@ -782,9 +1096,15 @@ function p.__process_input(wid)
         return
     end
 
-    local btn = ga_win_widget_button_process_input(wid)
-    if btn ~= nil and btn >= 1 and btn <= TAB_COUNT then
-        cur_tab = btn
+    if ga_win_mouse_pressed(wid, true) then
+        local cursor = ga_win_get_cursor_pos(wid)
+        for i = 1, TAB_COUNT do
+            local tx, ty, tw, th = tab_rect(i)
+            if i ~= cur_tab and btn_rect(cursor, tx, ty, tw, th) then
+                cur_tab = i
+                ga_play_sound("menu_select")
+            end
+        end
     end
     if ga_win_key_pressed(wid, "TAB") then
         cur_tab = (cur_tab % TAB_COUNT) + 1
@@ -798,8 +1118,8 @@ function p.__process_input(wid)
         rebuild(wid)
     end
 
-    if cur_tab == TAB_BLOCKS or cur_tab == TAB_WEAPONS or cur_tab == TAB_ENTITIES
-       or cur_tab == TAB_INTERACT or cur_tab == TAB_TELEPORT then
+    if cur_tab == TAB_BLOCKS or cur_tab == TAB_ENTITIES
+       or cur_tab == TAB_INTERACT or cur_tab == TAB_TELEPORT or cur_tab == TAB_DECOR then
         local np = num_pages()
         if ga_win_mouse_wheel_down(wid) or ga_win_key_pressed_or_spammed(wid, "DOWN", 1.0, 0.05) then
             page = page + 1
@@ -824,6 +1144,8 @@ function p.__process_input(wid)
                     choose_interactable(gi)
                 elseif cur_tab == TAB_TELEPORT then
                     choose_teleport(gi)
+                elseif cur_tab == TAB_DECOR then
+                    choose_decor(gi)
                 end
             end
         end
@@ -900,6 +1222,11 @@ function p.__process_input(wid)
 
     if cur_tab == TAB_WEAPONS and ga_win_mouse_pressed(wid, true) then
         local cursor = ga_win_get_cursor_pos(wid)
+        local n = wep_hovered(cursor)
+        if n >= 0 then
+            sel_weapon = n
+            ga_play_sound("menu_select")
+        end
         wep_buttons_layout(nil, function(b, bx, by, bw, bh)
             if btn_rect(cursor, bx, by - bh, bw, bh) then
                 b.fn()
@@ -1003,6 +1330,16 @@ function p.__process_input(wid)
             ex = ex + ew + 0.035
             if btn_rect2(cursor, ex, sy, ew, sh) then ga_set_i_by_delta(E_TTL, 10) end
 
+        elseif cur_tab == TAB_DECOR then
+            local clicked = nil
+            decor_strip_layout(function(id, x, y, w, h)
+                if clicked == nil and id ~= "d_val" and btn_rect(cursor, x, y, w, h) then clicked = id end
+            end)
+            if clicked and decor_strip_click(clicked) then
+                ga_play_sound("menu_select")
+                if string.sub(clicked, 1, 2) == "v_" then rebuild(wid) end
+            end
+
         elseif cur_tab == TAB_TELEPORT then
             local tx = 0.025
             local tw = 0.12
@@ -1033,35 +1370,43 @@ function p.__render(wid)
     ga_win_set_front_color(wid, std.vec(0.9, 0.85, 0.5))
     ga_win_txt_center(wid, 0.965, "CREATIVE INVENTORY")
     ga_win_set_front_color_default(wid)
+    ga_win_quad_color(wid, 0.02, 0.9455, 0.98, 0.9475, std.vec(0.30, 0.26, 0.12))
 
-    local tab_x   = { 0.01, 0.145, 0.29, 0.41, 0.53, 0.68, 0.83 }
-    local tab_len = { 6, 7, 5, 5, 8, 8, 8 }
-    local tx = tab_x[cur_tab]
-    local tw = tab_len[cur_tab] * 0.0125
-    ga_win_quad_color(wid, tx, 0.900, tx + tw, 0.905, std.vec(0.30, 0.85, 0.95))
+    render_tab_bar(wid)
 
     ga_win_set_char_size(wid, fix_charw(0.010), 0.020)
     ga_win_txt(wid, 0.02, 0.84, "SEARCH:")
 
     local sel = ga_get_s(SEL_VAR)
     if sel ~= nil and sel ~= "" then
+        local sx = 0.02
+        local stex = block_tex(sel)
+        if stex ~= "" then
+            local sh = 0.030
+            local sw = sh / aspect
+            ga_win_quad_color(wid, sx - 0.002 / aspect, 0.043, sx + sw + 0.002 / aspect, 0.045 + sh + 0.002, std.vec(1.0, 0.9, 0.3))
+            ga_win_quad(wid, sx, 0.045, sx + sw, 0.045 + sh, stex)
+            sx = sx + sw + 0.008
+        end
+        -- keep clear of the centred Close button
+        local close_x0 = 0.5 - #CLOSE_TXT * fix_charw(CLOSE_CW) * 0.5 - 0.02
+        local max_chars = math.max(4, math.floor((close_x0 - sx) / 0.009))
         ga_win_set_char_size(wid, 0.009, 0.018)
         ga_win_set_front_color(wid, std.vec(1.0, 0.9, 0.3))
-        ga_win_txt(wid, 0.02, 0.050, "Selected: " .. clean_name(sel))
+        ga_win_txt(wid, sx, 0.050, fit("Selected: " .. clean_name(sel), max_chars))
         ga_win_set_front_color_default(wid)
     end
 
-    ga_win_set_char_size(wid, 0.008, 0.016)
+    ga_win_set_char_size(wid, 0.0075, 0.015)
     ga_win_set_front_color(wid, std.vec(0.5, 0.5, 0.5))
-    ga_win_txt_center(wid, 0.020, "TAB=tabs | Wheel=page | V=build | C/MMB=eyedrop | Bksp=undo | F6=warp | F7=home")
+    ga_win_txt_center(wid, 0.010, "TAB=tabs | Wheel=page | V=build | C/MMB=eyedrop | Bksp=undo | F6=warp | F7=home")
     ga_win_set_front_color_default(wid)
 
     if cur_tab == TAB_BLOCKS then
         render_grid_tab(wid, "block")
         render_control_strip_blocks(wid)
     elseif cur_tab == TAB_WEAPONS then
-        render_grid_tab(wid, "weapon")
-        render_wep_buttons(wid)
+        render_weapons_tab(wid)
     elseif cur_tab == TAB_ITEMS then
         render_items_tab(wid)
     elseif cur_tab == TAB_BUFFS then
@@ -1073,6 +1418,50 @@ function p.__render(wid)
         render_grid_tab(wid, "interact")
     elseif cur_tab == TAB_TELEPORT then
         render_teleport_tab(wid)
+    elseif cur_tab == TAB_DECOR then
+        render_grid_tab(wid, "decor")
+        render_control_strip_decor(wid)
+    end
+end
+
+function render_tab_bar(wid)
+    local cursor = ga_win_get_cursor_pos(wid)
+    local pad = default_padding
+    for i, t in ipairs(TABS) do
+        local x, y, w, h = tab_rect(i)
+        local active = (i == cur_tab)
+        local hov = (not active) and btn_rect(cursor, x, y, w, h)
+
+        local edge = active and std.vec(0.22, 0.50, 0.58) or std.vec(0.20, 0.20, 0.30)
+        local bg   = active and std.vec(0.13, 0.19, 0.27)
+                  or (hov and std.vec(0.17, 0.17, 0.26) or std.vec(0.08, 0.08, 0.12))
+        ga_win_quad_color(wid, x - fix_padding(pad), y - pad, x + w + fix_padding(pad), y + h + pad, edge)
+        ga_win_quad_color(wid, x, y, x + w, y + h, bg)
+        if active then
+            ga_win_quad_color(wid, x, y, x + w, y + 0.005, std.vec(0.30, 0.85, 0.95))
+        end
+
+        -- icon + label, centred together inside the tab
+        local ih    = h - 0.016
+        local iw    = ih / aspect
+        local gap   = fix_padding(0.012)
+        local n     = #t.label
+        local charw = math.min(fix_charw(0.0095), (w - iw - gap - fix_padding(0.016)) / n)
+        local charh = 0.019 * charw / fix_charw(0.0095)
+        local gx    = x + (w - (iw + gap + charw * n)) * 0.5
+        local dw    = draw_icon(wid, gx, y + 0.009, ih, t.icon, true)
+        if dw == 0 then gx = x + (w - charw * n) * 0.5 else gx = gx + iw + gap end
+
+        ga_win_set_char_size(wid, charw, charh)
+        if active then
+            ga_win_set_front_color(wid, std.vec(1.0, 0.92, 0.55))
+        elseif hov then
+            ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
+        else
+            ga_win_set_front_color(wid, std.vec(0.62, 0.62, 0.70))
+        end
+        ga_win_txt(wid, gx, y + h * 0.5 - charh * 0.40, t.label)
+        ga_win_set_front_color_default(wid)
     end
 end
 
@@ -1202,6 +1591,34 @@ function render_control_strip_entities(wid)
     small_btn(wid, cursor, ex, sy, ew, sh, "+", false)
 end
 
+function render_control_strip_decor(wid)
+    local cursor = ga_win_get_cursor_pos(wid)
+    ga_win_quad_color(wid, 0.02, 0.092, 0.98, 0.133, std.vec(0.06, 0.06, 0.10))
+    decor_strip_layout(function(id, x, y, w, h, label, active, group)
+        if group then
+            ga_win_set_char_size(wid, 0.007, 0.014)
+            ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
+            ga_win_txt(wid, x, y + h + 0.008, group)
+            ga_win_set_front_color_default(wid)
+        end
+        if id == "d_val" then
+            ga_win_set_char_size(wid, 0.010, 0.020)
+            ga_win_set_front_color(wid, std.vec(1, 1, 1))
+            ga_win_txt(wid, x + w * 0.5 - 0.005 * #label, y + h * 0.5 - 0.008, label)
+            ga_win_set_front_color_default(wid)
+        else
+            small_btn(wid, cursor, x, y, w, h, label, active)
+        end
+    end)
+
+    ga_win_set_char_size(wid, 0.0075, 0.015)
+    ga_win_set_front_color(wid, std.vec(0.55, 0.55, 0.62))
+    ga_win_txt_center(wid, 0.212, "Click to place at the crosshair (DIST ahead). Pictures face you; SNAP aligns them to walls.")
+    ga_win_set_front_color(wid, std.vec(0.85, 0.65, 0.35))
+    ga_win_txt_center(wid, 0.188, "Trophies are real: touching one collects it (gold/health bonus + its Steam achievement).")
+    ga_win_set_front_color_default(wid)
+end
+
 function render_teleport_tab(wid)
     render_grid_tab(wid, "teleport")
 
@@ -1224,33 +1641,124 @@ function render_teleport_tab(wid)
     ga_win_set_front_color_default(wid)
 end
 
-function render_wep_buttons(wid)
+local function panel(wid, x0, y0, x1, y1)
+    ga_win_quad_color(wid, x0 - 0.003, y0 - 0.003, x1 + 0.003, y1 + 0.003, std.vec(0.15, 0.15, 0.22))
+    ga_win_quad_color(wid, x0, y0, x1, y1, std.vec(0.08, 0.08, 0.12))
+end
+
+local function frame(wid, x0, y0, x1, y1, t, c)
+    ga_win_quad_color(wid, x0, y1 - t, x1, y1, c)
+    ga_win_quad_color(wid, x0, y0, x1, y0 + t, c)
+    ga_win_quad_color(wid, x0, y0, x0 + t / aspect, y1, c)
+    ga_win_quad_color(wid, x1 - t / aspect, y0, x1, y1, c)
+end
+
+function render_weapons_tab(wid)
     local cursor = ga_win_get_cursor_pos(wid)
 
-    ga_win_set_char_size(wid, 0.013, 0.026)
-    ga_win_set_front_color(wid, std.vec(0.4, 0.9, 1.0))
-    local ammo_txt = "   (ammo: " .. ga_get_i("xar.player.gun" .. sel_weapon .. ".ammo") .. ")"
-    ga_win_txt(wid, 0.06, WEP_BTN_Y0 + 0.035, "Editing Weapon " .. sel_weapon .. ammo_txt .. "  (click a weapon above to switch)")
+    ga_win_set_char_size(wid, 0.012, 0.024)
+    ga_win_set_front_color(wid, std.vec(0.9, 0.85, 0.5))
+    ga_win_txt_center(wid, 0.810, "WEAPON LOADOUT")
     ga_win_set_front_color_default(wid)
 
+    -- weapon strip ---------------------------------------------------------
+    local sx0 = wep_tile_rect(0) - 0.02
+    local _, _, sx1 = wep_tile_rect(9)
+    sx1 = sx1 + 0.02
+    panel(wid, sx0, WEP_TILE_TOP - WEP_TILE_H - 0.048, sx1, WEP_TILE_TOP + 0.012)
+
+    local hov = wep_hovered(cursor)
+    for n = 0, 9 do
+        local x0, y0, x1, y1 = wep_tile_rect(n)
+        local ammo = gun_i(n, "ammo", 0)
+        local tex = "ammo_gun" .. n
+        if ammo <= 0 and ntex(tex .. "_grey") then tex = tex .. "_grey" end
+        ga_win_quad_color(wid, x0 - 0.002 / aspect, y0 - 0.002, x1 + 0.002 / aspect, y1 + 0.002, std.vec(0, 0, 0))
+        draw_icon(wid, x0, y0, y1 - y0, tex, false)
+        if n == sel_weapon then
+            frame(wid, x0, y0, x1, y1, 0.005, std.vec(1.0, 0.9, 0.2))
+        elseif n == hov then
+            frame(wid, x0, y0, x1, y1, 0.004, std.vec(1.0, 1.0, 1.0))
+        end
+        if is_equipped(n) then
+            ga_win_quad_color(wid, x0, y0 - 0.011, x1, y0 - 0.006, std.vec(0.30, 0.90, 0.40))
+        end
+        local s  = tostring(ammo)
+        local cw = math.min(0.0075, (x1 - x0) / math.max(1, #s))
+        ga_win_set_char_size(wid, cw, cw * 2)
+        ga_win_set_front_color(wid, ammo > 0 and std.vec(0.75, 0.75, 0.80) or std.vec(0.75, 0.35, 0.30))
+        ga_win_txt(wid, (x0 + x1) * 0.5 - cw * #s * 0.5, y0 - 0.034, s)
+        ga_win_set_front_color_default(wid)
+    end
+
+    -- selected weapon panel -------------------------------------------------
+    panel(wid, 0.02, WEP_ROW_Y0 - 2 * WEP_ROW_PITCH - 0.064, 0.98, 0.615)
+
+    local ih = 0.080
+    local iw = draw_icon(wid, 0.04, 0.520, ih, "ammo_gun" .. sel_weapon, true)
+    local tx = 0.04 + iw + 0.020
+    ga_win_set_char_size(wid, 0.016, 0.032)
+    ga_win_set_front_color(wid, std.vec(1.0, 0.9, 0.45))
+    ga_win_txt(wid, tx, 0.565, string.upper(wep_name(sel_weapon)))
+    ga_win_set_char_size(wid, 0.009, 0.018)
+    ga_win_set_front_color(wid, std.vec(0.55, 0.80, 0.95))
+    ga_win_txt(wid, tx, 0.528, "Slot " .. sel_weapon
+        .. "    Ammo " .. gun_i(sel_weapon, "ammo", 0)
+        .. "    Upgrade level " .. gun_upgrade_level(sel_weapon))
+    ga_win_set_front_color_default(wid)
+
+    if is_equipped(sel_weapon) then
+        local bx0, bx1, by0, by1 = 0.83, 0.96, 0.548, 0.585
+        ga_win_quad_color(wid, bx0 - 0.002 / aspect, by0 - 0.002, bx1 + 0.002 / aspect, by1 + 0.002, std.vec(0.30, 0.85, 0.40))
+        ga_win_quad_color(wid, bx0, by0, bx1, by1, std.vec(0.10, 0.30, 0.14))
+        ga_win_set_char_size(wid, 0.009, 0.018)
+        ga_win_set_front_color(wid, std.vec(0.75, 1.0, 0.75))
+        ga_win_txt(wid, (bx0 + bx1) * 0.5 - 0.009 * 4, (by0 + by1) * 0.5 - 0.008, "EQUIPPED")
+        ga_win_set_front_color_default(wid)
+    end
+
+    ga_win_quad_color(wid, 0.04, 0.503, 0.96, 0.505, std.vec(0.20, 0.20, 0.30))
+
     wep_buttons_layout(
-        function(header, by)
+        function(row, by)
+            local mid = by - WEP_BTN_H * 0.5
+            ga_win_quad_color(wid, 0.03, by - 0.044, 0.97, by + 0.009, std.vec(0.12, 0.12, 0.17))
+            local icon = row.icon
+            if icon == "@sel_ammo" then icon = "ammo_gun" .. sel_weapon end
+            local hx = 0.045
+            local hw = draw_icon(wid, hx, mid - 0.016, 0.032, icon, true)
+            if hw > 0 then hx = hx + hw + 0.010 end
             ga_win_set_char_size(wid, 0.011, 0.022)
             ga_win_set_front_color(wid, std.vec(1.0, 0.7, 0.3))
-            ga_win_txt(wid, 0.06, by, header)
+            ga_win_txt(wid, hx, mid - 0.009, row.header)
             ga_win_set_front_color_default(wid)
         end,
         function(b, bx, by, bw, bh)
+            local active   = b.active and b.active()
             local hovering = btn_rect(cursor, bx, by - bh, bw, bh)
-            local col = hovering and std.vec(0.45, 0.35, 0.20) or std.vec(0.28, 0.22, 0.13)
+            local col = active and std.vec(0.50, 0.45, 0.18)
+                     or (hovering and std.vec(0.45, 0.35, 0.20) or std.vec(0.28, 0.22, 0.13))
             local padding = default_padding
-            ga_win_quad_color(wid, bx - fix_charw(padding), by - bh - padding, bx + bw + fix_charw(padding), by + padding, std.vec(0.5, 0.4, 0.2))
+            ga_win_quad_color(wid, bx - fix_padding(padding), by - bh - padding, bx + bw + fix_padding(padding), by + padding, std.vec(0.5, 0.4, 0.2))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
-            ga_win_set_char_size(wid, 0.010, 0.020)
+            ga_win_set_char_size(wid, 0.009, 0.018)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
-            ga_win_txt(wid, bx + 0.008, by - bh + 0.013, b.label)
+            ga_win_txt(wid, bx + 0.006, by - bh * 0.5 - 0.008, b.label)
             ga_win_set_front_color_default(wid)
         end)
+
+    if hov >= 0 then
+        local shown = wep_name(hov)
+        ga_win_set_char_size(wid, 0.0092, 0.020)
+        local tw = 0.0092 * #shown + 0.010
+        local ttx, tty = cursor.x + 0.015, cursor.y + 0.015
+        if ttx + tw > 0.98 then ttx = 0.98 - tw end
+        ga_win_quad_color(wid, ttx - 0.005, tty - 0.005, ttx + tw + 0.005, tty + 0.032, std.vec(0.12, 0.12, 0.18))
+        ga_win_quad_color(wid, ttx - 0.003, tty - 0.003, ttx + tw + 0.003, tty + 0.030, std.vec(0.02, 0.02, 0.02))
+        ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
+        ga_win_txt(wid, ttx + 0.003, tty + 0.005, shown)
+        ga_win_set_front_color_default(wid)
+    end
 end
 
 function render_grid_tab(wid, mode)
@@ -1265,6 +1773,21 @@ function render_grid_tab(wid, mode)
     local gy_bot = Y0 - (ROWS - 1) * CH - (CH - GAPY) - 0.006
     ga_win_quad_color(wid, gx0 - 0.003, gy_bot - 0.003, gx1 + 0.003, gy_top + 0.003, std.vec(0.15, 0.15, 0.22))
     ga_win_quad_color(wid, gx0, gy_bot, gx1, gy_top, std.vec(0.08, 0.08, 0.12))
+
+    if #items == 0 then
+        local msg = "No matches"
+        if mode == "block" and view_mode == "FAV" then
+            msg = "No favorites yet - right-click a block to add one"
+        elseif mode == "block" and view_mode == "RECENT" then
+            msg = "No recent blocks yet - pick one to start building"
+        elseif mode == "teleport" then
+            msg = "No waypoints found"
+        end
+        ga_win_set_char_size(wid, fix_charw(0.010), 0.020)
+        ga_win_set_front_color(wid, std.vec(0.45, 0.45, 0.55))
+        ga_win_txt_center(wid, (gy_top + gy_bot) * 0.5, msg)
+        ga_win_set_front_color_default(wid)
+    end
 
     local cursor = ga_win_get_cursor_pos(wid)
     local hov_gi, hov_li = hovered_index(cursor)
@@ -1283,6 +1806,7 @@ function render_grid_tab(wid, mode)
             if     mode == "block"    then tex = block_tex(it.raw)
             elseif mode == "entity"   then tex = ent_tex(it.raw)
             elseif mode == "interact" then tex = valid_tex(it.tex)
+            elseif mode == "decor"    then tex = valid_tex(it.tex)
             end
             if tex ~= "" then
                 ga_win_quad(wid, minx, miny, maxx, maxy, tex)
@@ -1347,10 +1871,16 @@ function render_items_tab(wid)
     local by = 0.78
 
     for _, section in ipairs(ITEM_BUTTONS) do
+        -- row card; the label + icon are centred on the button row
+        local mid = by - 0.0175
+        ga_win_quad_color(wid, 0.02, by - 0.044, 0.98, by + 0.009, std.vec(0.07, 0.07, 0.11))
+        local hx = 0.03
+        local hw = draw_icon(wid, hx, mid - 0.018, 0.036, section.icon, true)
+        if hw > 0 then hx = hx + hw + 0.010 end
         ga_win_set_char_size(wid, 0.011, 0.022)
         ga_win_set_front_color(wid, std.vec(1.0, 0.9, 0.3))
         local cur_val = ga_get_i(section.var)
-        ga_win_txt(wid, 0.03, by, section.section .. ": " .. tostring(cur_val))
+        ga_win_txt(wid, hx, mid - 0.009, section.section .. ": " .. tostring(cur_val))
         ga_win_set_front_color_default(wid)
 
         local bx = 0.30
@@ -1376,7 +1906,7 @@ function render_items_tab(wid)
     ga_win_set_front_color(wid, std.vec(0.6, 0.8, 1.0))
     local xp_level = ga_get_i("xar.experience.level")
     local xp_tnl = ga_get_i("xar.experience.to_next_level")
-    ga_win_txt(wid, 0.03, by + 0.01, "XP Level: " .. tostring(xp_level) .. "   To Next: " .. tostring(xp_tnl))
+    ga_win_txt(wid, 0.03, by - 0.012, "XP Level: " .. tostring(xp_level) .. "   To Next: " .. tostring(xp_tnl))
     ga_win_set_front_color_default(wid)
 end
 
@@ -1390,9 +1920,12 @@ function render_buffs_tab(wid)
     local by = 0.78
 
     for _, section in ipairs(BUFF_BUTTONS) do
+        local hx = 0.03
+        local hw = section.icon and draw_icon(wid, hx, by - 0.005, 0.030, section.icon, true) or 0
+        if hw > 0 then hx = hx + hw + 0.008 end
         ga_win_set_char_size(wid, 0.011, 0.022)
         ga_win_set_front_color(wid, std.vec(1.0, 0.7, 0.3))
-        ga_win_txt(wid, 0.03, by, section.section)
+        ga_win_txt(wid, hx, by, section.section)
         ga_win_set_front_color_default(wid)
         by = by - 0.04
 
@@ -1410,8 +1943,12 @@ function render_buffs_tab(wid)
             local padding = default_padding
             ga_win_quad_color(wid, bx - fix_padding(padding), by - bh - padding, bx + bw + fix_padding(padding), by + padding, std.vec(0.40, 0.30, 0.50))
             ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
+            local lx = bx + 0.004
+            local iw = e.icon and draw_icon(wid, lx, by - bh + 0.004, bh - 0.008, e.icon, false) or 0
+            if iw > 0 then lx = lx + iw + 0.005 end
+            ga_win_set_char_size(wid, 0.008, 0.016)
             ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
-            ga_win_txt(wid, bx + 0.004, by - bh + 0.007, e.label)
+            ga_win_txt(wid, lx, by - bh + 0.007, e.label)
             ga_win_set_front_color_default(wid)
             bx = bx + bw + 0.005
         end
