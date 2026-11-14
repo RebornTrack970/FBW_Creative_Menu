@@ -1,6 +1,7 @@
 # FBW-Creative-Menu (For Version 1.02.02)
 
 - Press G to open Creative Menu. Press V to enable/disable block building.
+- Build mode: L-click place, R-click break/remove, wheel = placement distance for non-blocks, 1-9 = hotbar slot, C/middle mouse = pick.
   
 # How to Install:
 

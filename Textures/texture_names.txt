@@ -1,0 +1,4 @@
+#Format: name   flags   file
+
+# Area-fill selection box (rendered almost transparent)
+creative_cyan                _ creative_cyan.png

@@ -4,10 +4,16 @@ A Minecraft-style creative inventory for Xar.
 
 [b]Controls[/b]
 [list]
-[*][b]G[/b] - open the Creative Menu
-[*][b]V[/b] - toggle build mode (mouse buttons place / break the block you look at)
-[*][b]C[/b] or [b]middle mouse[/b] - eyedropper (pick the block you look at)
-[*][b]Backspace[/b] (hold) - undo place / break / brush
+[*][b]G[/b] - open the Creative Menu (clicking anything puts it in your hotbar)
+[*][b]V[/b] - toggle build mode (guns off, hotbar on)
+[*][b]Left click[/b] - place the selected block / monster / shop / picture / trophy
+[*][b]Right click[/b] - break the block (white outline) or remove the thing (red outline)
+[*][b]Mouse wheel[/b] - scroll the hotbar
+[*][b]Alt + mouse wheel[/b] - move the placement point for monsters / shops / decor closer or farther
+[*][b]1-9[/b] - pick a hotbar slot
+[*][b]C[/b] or [b]middle mouse[/b] - eyedropper (pick the block or monster you look at)
+[*][b]Alt + click, Alt + click[/b] - 3D area fill: first click sets one corner, then a cyan cursor floats in front of you (Alt + wheel = closer / farther); the second click sets the other corner, left click fills the box with the selected block, right click deletes it (release Alt to cancel). The box stays inside the loaded chunks around you
+[*][b]Backspace[/b] (hold) - undo place / break / brush / area
 [*][b]F6[/b] - warp to the waypoint matching your teleport search
 [*][b]F7[/b] - teleport to your emergency waypoint
 [/list]
@@ -15,13 +21,16 @@ A Minecraft-style creative inventory for Xar.
 [b]Tabs[/b]
 [list]
 [*][b]Blocks[/b] - every Xar block, with search, favorites, recents, and cube/sphere brushes (size 1-10). Blocks known to crash the game are hidden.
-[*][b]Weapons[/b] - equip any gun, max/refill/empty ammo, set upgrades
-[*][b]Items[/b] - gold, health, armor, shield, XP
-[*][b]Buffs[/b] - keys, timed powerups (5x damage, invulnerability, 5x XP), god mode, noclip, shrink-anywhere
-[*][b]Entities[/b] - spawn monsters where you look (count, distance, frozen, ally, lifetime)
-[*][b]Interact[/b] - spawn shops, save points, respawn points, waypoints, and more
+[*][b]Weapons[/b] - equip any gun, max/refill/empty ammo, set upgrades; click an ammo or upgrade number to type an exact amount; unlock, equip or re-lock any weapon fire mode (or unlock every mode at once)
+[*][b]Items[/b] - gold, health, armor, shield, XP; click a number to type an exact amount
+[*][b]Buffs[/b] - keys, timed powerups (5x damage, invulnerability, 5x XP), god mode, noclip, shrink-anywhere, Pink Path / Blue Path (hotbar items that work like using a pink or blue ring)
+[*][b]Entities[/b] - place monsters like blocks (count, lifetime, FREEZE = spawned frozen like a laser hit)
+[*][b]Interact[/b] - place keys, ammo, health, gold, shops, save points, respawn points, waypoints, and more (listed by type); [b]Text Box[/b] asks for its message (with colors); [b]Trophies[/b] opens a page with every trophy
 [*][b]Teleport[/b] - search and warp to your waypoints
+[*][b]Decor[/b] - hang pictures (sizes, facing)
 [/list]
+
+Your hotbar is saved with your game.
 
 This is a mod for [b]xar[/b]. Enable it under Menu > Mods > Select Mods.
 

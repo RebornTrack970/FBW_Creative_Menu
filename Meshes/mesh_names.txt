@@ -1,0 +1,7 @@
+#Format: name          tex_name               wavefront_file
+
+# Area-fill selection box (unit cube centred on the origin)
+creative_area_box            creative_cyan          large_box.obj
+
+# Pictures placed from the DECOR tab (BasicEnts/bent_creative_picture.lua)
+creative_picture             block_black            creative_picture.obj
