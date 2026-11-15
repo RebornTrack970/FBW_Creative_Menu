@@ -284,15 +284,10 @@ end
 function p.uncrash__info()
     local out = uncrash.info {
         local_funcs={
-            compute_grid=C.compute_grid,
-            clean_name=C.clean_name,
-            clean_ent_name=C.clean_ent_name,
-            category_of=C.category_of,
-            -- more!!!
+            tab_rect=tab_rect,
+            on_tab=on_tab,
         }
     }
-    C.compute_grid=out.compute_grid
-    C.clean_name=out.clean_name
-    C.clean_ent_name=out.clean_ent_name
-    C.category_of=out.category_of
+    tab_rect=out.tab_rect
+    on_tab=out.on_tab
 end

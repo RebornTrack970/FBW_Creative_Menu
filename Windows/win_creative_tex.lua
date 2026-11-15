@@ -553,3 +553,15 @@ function p.__on_start(wid) end
 function p.__on_end(wid) end
 function p.__render(wid) end
 function p.__process_input(wid) end
+
+function p.uncrash__info()
+    local out = uncrash.info {
+        local_funcs={
+            choice_index=choice_index,
+            title_case=title_case,
+            --more!!!
+        }
+    }
+    choice_index=out.choice_index
+    title_case=out.title_case
+end
