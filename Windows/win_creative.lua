@@ -43,7 +43,8 @@ function p.init(wid)
     ga_init_i(C.E_DIST, 4)
     ga_init_b(C.E_FREEZE, false)
     ga_init_i(C.E_TTL, 0)
-    ga_init_i(C.D_SIZE, 2)
+    ga_init_i(C.E_HP, 0)
+    ga_init_i(C.D_SIZE, 100)
     ga_init_b(C.D_SNAP, true)
     ga_init_i(C.SLOT_VAR, 1)
     for i = 1, C.HB_COUNT do ga_init_s(C.HB_PREFIX .. i, "") end
@@ -71,12 +72,24 @@ function p.init(wid)
     S.page = math.max(0, math.min(S.tab_pages[S.cur_tab] or 0, C.num_pages() - 1))
 end
 
-function p.__start(wid)    p.init(wid) end
+function p.__start(wid)
+    p.init(wid); S.reopening = false
+    if C.patch_base_txt then pcall(C.patch_base_txt) end   -- EDIT on base's text box window
+end
 function p.__end(wid)
     -- last_tab = the tab `page` belongs to (cur_tab may already be the next
     -- tab when the window reopens itself)
     if S.last_tab >= 1 then S.tab_pages[S.last_tab] = S.page end
     S.inited = false; S.use_3d_mesh = nil; C.num_reset()
+    if not S.reopening then S.help_open = false end   -- the ? help survives a self-reopen only
+end
+
+local function on_tab(cursor)
+    for i = 1, C.TAB_COUNT do
+        local tx, ty, tw, th = tab_rect(i)
+        if C.btn_rect(cursor, tx, ty, tw, th) then return true end
+    end
+    return false
 end
 
 function p.__process_input(wid)
@@ -85,14 +98,18 @@ function p.__process_input(wid)
     -- an open amount field owns the keyboard (digits, Backspace, Enter, Esc)
     local editing, closed = C.num_edit_keys(wid)
     if closed then return end
-    if ga_win_widget_go_back_button_process_input(wid) or (not editing and ga_win_key_pressed(wid, "ESC")) then
+    local esc = ga_win_key_pressed(wid, "ESC")
+    if editing and esc then return end        -- Esc only cancelled the field
+    -- ? button + help panel (Esc closes the help first, not the menu)
+    if C.help_input(wid, editing, esc, on_tab) then return end
+    if ga_win_widget_go_back_button_process_input(wid) or (not editing and esc) then
         C.num_edit_commit()
         ga_window_pop()
         return
     end
 
     -- click on an amount = edit it; click anywhere else applies the open one
-    if ga_win_mouse_pressed(wid, true) and C.num_edit_click(ga_win_get_cursor_pos(wid)) then
+    if not S.help_open and ga_win_mouse_pressed(wid, true) and C.num_edit_click(ga_win_get_cursor_pos(wid)) then
         return
     end
 
@@ -101,6 +118,7 @@ function p.__process_input(wid)
         for i = 1, C.TAB_COUNT do
             local tx, ty, tw, th = tab_rect(i)
             if i ~= S.cur_tab and C.btn_rect(cursor, tx, ty, tw, th) then
+                C.num_edit_commit()
                 S.cur_tab = i
                 ga_play_sound("menu_select")
             end
@@ -118,6 +136,7 @@ function p.__process_input(wid)
     if S.cur_tab ~= S.last_tab and (C.SEARCH_TABS[S.cur_tab] == true) ~= S.has_search then
         -- the search box can't appear / disappear in an open window, so
         -- reopen the menu on the new tab (__end saves the old tab's page)
+        S.reopening = true
         ga_window_pop()
         ga_window_push("win_creative")
         return
@@ -129,6 +148,7 @@ function p.__process_input(wid)
         -- going to another tab closes INTERACT's trophy page (reopening the
         -- menu on INTERACT keeps it)
         if tab_changed and S.cur_tab ~= C.TAB_INTERACT then C.tp.sub = nil end
+        if tab_changed and S.cur_tab ~= C.TAB_DECOR then C.dp.sub = nil end   -- same for SCHEMATICS
         S.last_tab = S.cur_tab
         S.last_search = cur_search
         C.rebuild(wid)                -- resets page to 0
@@ -137,6 +157,8 @@ function p.__process_input(wid)
         end
     end
 
+    C.dp.poll(wid)                            -- schematics list changed (loaded / saved / deleted)
+    if S.help_open then return end            -- the help panel covers the tab
     C.grid_input(wid)
     if C.panels_input(wid) then return end
     C.strip_input(wid)
@@ -198,20 +220,24 @@ function p.__render(wid)
     elseif S.cur_tab == C.TAB_ENTITIES then
         C.render_grid_tab(wid, "entity")
         C.render_control_strip_entities(wid)
-        C.render_pick_hint(wid, "Click = put in hotbar. L-click spawns at the white box, R-click removes the red one, Alt+wheel = distance, Ctrl = id.")
     elseif S.cur_tab == C.TAB_INTERACT and C.tp.sub == "trophies" then
         C.render_grid_tab(wid, "interact")
         C.render_trophy_strip(wid)
     elseif S.cur_tab == C.TAB_INTERACT then
         C.render_grid_tab(wid, "interact")
         C.render_control_strip_interact(wid)
-        C.render_pick_hint(wid, "Click = hotbar (Trophies: trophy list, Text Box: asks text). L-click place, R-click remove, Alt+wheel = distance, Ctrl = id.")
     elseif S.cur_tab == C.TAB_TELEPORT then
         C.render_teleport_tab(wid)
+    elseif S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" then
+        C.render_grid_tab(wid, "schem")
+        C.render_schem_strip(wid)
     elseif S.cur_tab == C.TAB_DECOR then
         C.render_grid_tab(wid, "decor")
         C.render_control_strip_decor(wid)
     end
+
+    C.render_help(wid)          -- over the tab (when open)
+    C.render_help_button(wid)
 end
 
 function C.render_tab_bar(wid)

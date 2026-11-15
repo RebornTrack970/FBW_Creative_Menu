@@ -104,33 +104,37 @@ local function area_fill(x0, y0, z0, x1, y1, z1)
     ga_render_pop_matrix()
 end
 
+-- Alt held with corner 1 set (area fill or schematic, any hotbar slot): the
+-- live box. Returns true when it drew it (then nothing else is drawn).
+local function render_area_select()
+    if not ga_get_b(C.ALT_VAR) or S.area == nil then return false end
+    local vlevel = ga_get_viewer_level()
+    if S.area.level ~= vlevel then return true end
+    -- live 3D box from corner 1 (re-resolved: the grid shifts as you move) to
+    -- the depth cursor
+    local a = C.area_a()
+    if a == nil then return true end
+    local c = C.area_cursor() or a
+    local x0, y0, z0, x1, y1, z1 = C.area_box(a, c)
+    local w, h, d = x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1
+    local n = w * h * d
+    local loaded = "all"
+    if n <= C.AREA_CAP then loaded = C.box_loaded(vlevel, x0, y0, z0, x1, y1, z1) end
+    area_lines(x0, y0, z0, x1, y1, z1, (loaded == "all") and CYAN or ORANGE)
+    draw_cells(c, 0, 0.03, CYAN, 3.0)           -- the cursor cell itself
+    area_fill(x0, y0, z0, x1, y1, z1)            -- mesh LAST: no lines after it
+    local info = w .. "x" .. h .. "x" .. d .. " = " .. n
+    if n > C.AREA_CAP then info = info .. " (too big, max " .. C.AREA_CAP .. ")"
+    elseif loaded ~= "all" then info = info .. " (part not loaded, skipped)" end
+    info = info .. "   depth " .. S.area_depth
+    if ga_get_s(C.AREA_VAR) ~= info then ga_set_s(C.AREA_VAR, info) end
+    return true                                  -- no white/grey outlines while dragging
+end
+
 local function render_block_outline()
     local vlevel = ga_get_viewer_level()
     local alt = ga_get_b(C.ALT_VAR)
     local level, bp, bp2 = C.look_target()
-
-    if alt and S.area ~= nil then
-        if S.area.level ~= vlevel then return end
-        -- live 3D box from corner 1 (re-resolved: the grid shifts as you
-        -- move) to the depth cursor
-        local a = C.area_a()
-        if a == nil then return end
-        local c = C.area_cursor() or a
-        local x0, y0, z0, x1, y1, z1 = C.area_box(a, c)
-        local w, h, d = x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1
-        local n = w * h * d
-        local loaded = "all"
-        if n <= C.AREA_CAP then loaded = C.box_loaded(vlevel, x0, y0, z0, x1, y1, z1) end
-        area_lines(x0, y0, z0, x1, y1, z1, (loaded == "all") and CYAN or ORANGE)
-        draw_cells(c, 0, 0.03, CYAN, 3.0)       -- the cursor cell itself
-        area_fill(x0, y0, z0, x1, y1, z1)        -- mesh LAST: no lines after it
-        local info = w .. "x" .. h .. "x" .. d .. " = " .. n
-        if n > C.AREA_CAP then info = info .. " (too big, max " .. C.AREA_CAP .. ")"
-        elseif loaded ~= "all" then info = info .. " (part not loaded, skipped)" end
-        info = info .. "   depth " .. S.area_depth
-        if ga_get_s(C.AREA_VAR) ~= info then ga_set_s(C.AREA_VAR, info) end
-        return                                  -- no white/grey outlines while dragging
-    end
 
     if alt and (level == nil or level ~= vlevel) then
         -- Alt held, nothing of your level aimed (sky, K/M-chunk terrain):
@@ -186,13 +190,59 @@ local function render_nonblock_preview(kind, raw)
     end
 end
 
+-- Holding a schematic: where L-click puts it. Outline of its box (orange when
+-- part of it isn't loaded), small boxes / crosses for its ents and monsters,
+-- and the blocks as half see-through cubes with their own textures
+-- (game_creative_schem.lua C.schem_holo). Lines first, the meshes LAST (see
+-- area_fill).
+local HOLO_ALPHA, HOLO_SCALE = 0.5, 0.98     -- a hair inside the cells: no flicker on block faces
+local function holo_cube(x, y, z, tex)
+    ga_render_matrix_translated(x, y, z)
+    ga_render_matrix_scaled(HOLO_SCALE, HOLO_SCALE, HOLO_SCALE)
+    ga_render_mesh_with_tex_alpha_no_lighting("creative_area_box", tex, HOLO_ALPHA)
+end
+local function render_schem_preview(raw)
+    local sch = C.schem_get(raw)
+    if sch == nil then return end
+    local level, ox, oy, oz = C.schem_origin(sch)
+    if level ~= ga_get_viewer_level() then return end
+    local x1, y1, z1 = ox + sch.sx - 1, oy + sch.sy - 1, oz + sch.sz - 1
+    local loaded = C.box_loaded(level, ox, oy, oz, x1, y1, z1)
+    area_lines(ox, oy, oz, x1, y1, z1, (loaded == "all") and CYAN or ORANGE)
+    for _, b in ipairs(sch.bents) do
+        draw_cells(std.bp(ox + b.x, oy + b.y, oz + b.z), 0, -0.3, CYAN, 1.5)
+    end
+    local k = 0.35
+    ga_render_color(std.vec(CYAN[1], CYAN[2], CYAN[3]))
+    for _, m in ipairs(sch.ments) do
+        local x, y, z = ox + m.x, oy + m.y, oz + m.z
+        ga_render_line_thick(std.vec(x - k, y, z), std.vec(x + k, y, z), 2.0)
+        ga_render_line_thick(std.vec(x, y - k, z), std.vec(x, y + k, z), 2.0)
+        ga_render_line_thick(std.vec(x, y, z - k), std.vec(x, y, z + k), 2.0)
+    end
+    local holo = C.schem_holo(sch)
+    for _, g in ipairs(holo.groups) do
+        ga_render_color(std.vec(g.col[1], g.col[2], g.col[3]))   -- tints the texture
+        local c = g.cells
+        for i = 1, #c, 3 do
+            ga_render_push_matrix()
+            pcall(holo_cube, ox + c[i] + 0.5, oy + c[i + 1] + 0.5, oz + c[i + 2] + 0.5, g.tex)
+            ga_render_pop_matrix()
+        end
+    end
+end
+
 local outline_err_shown = false
 local function render_outline()
     if not ga_exists(C.MODE_VAR) or not ga_get_b(C.MODE_VAR) then return end
     C.chunk_cache_reset()   -- vcps shift as you move, so cache per frame only
     local kind, raw = C.cur_entry()
-    if kind == "path" then
-        -- nothing to aim with a path entry
+    if render_area_select() then
+        -- Alt + corner 1 set: only the selection box
+    elseif kind == "path" or kind == "action" then
+        -- nothing to aim with a path / action entry (and no box in screenshots)
+    elseif kind == "schem" then
+        render_schem_preview(raw)
     elseif kind ~= nil and kind ~= "block" then
         render_nonblock_preview(kind, raw)
     else

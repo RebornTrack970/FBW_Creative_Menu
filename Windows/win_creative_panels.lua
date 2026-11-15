@@ -12,9 +12,14 @@ local C, S = creative_ui, creative_ui.state
 -- rects are recorded while rendering (num_field) and hit-tested next frame.
 -------------------------------------------------------------------------------
 
-local num_targets = {}   -- this frame's amounts: { key, x0, y0, x1, y1, value, apply, neg }
-local num_edit    = nil  -- { key, text, fresh, apply, on_enter, neg }; fresh = text still "selected"
+local num_targets = {}   -- this frame's amounts: { key, x0, y0, x1, y1, tx, cw, len, value, apply, neg }
+-- { key, text, pos, fresh, apply, on_enter, neg }: pos = caret (0 = before
+-- the 1st char, #text = after the last), fresh = whole text "selected"
+-- (typing replaces it, Left / Right / Home / End drop the selection)
+local num_edit    = nil
 local num_blink   = 0
+local num_last_click = nil   -- { key, time }: a 2nd click on the same field soon after = select all
+local DOUBLE_CLICK = 0.35    -- seconds
 local NUM_DIGITS  = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" }
 local NUM_MAX_LEN = 10   -- digits (a leading "-" comes on top)
 local NUM_MAX     = 2147483647
@@ -46,7 +51,8 @@ function C.num_edit_commit()
         return
     end
     local n = tonumber(e.text)
-    if n == nil then return end              -- emptied (or just "-") = leave the value alone
+    if n == nil then n = e.empty end         -- emptied (or just "-"): the field's opts.empty,
+    if n == nil then return end              -- else leave the value alone
     if n > NUM_MAX then n = NUM_MAX end
     if n < -NUM_MAX then n = -NUM_MAX end
     if n < 0 and not e.neg then n = 0 end
@@ -55,87 +61,164 @@ function C.num_edit_commit()
 end
 
 -- Open a field from code (the INTERACT amount pickups open theirs when picked).
--- The value starts "selected", so typing replaces it. on_enter() runs after
--- Enter applied the value (not on a click elsewhere / Esc); it may close the
--- window. neg = the "-" key may make it negative. text_mode = a text field
--- (letters, digits, punctuation; apply gets the string).
+-- The value starts "selected", so typing replaces it (arrow keys drop the
+-- selection to edit it instead). on_enter() runs after Enter applied the
+-- value (not on a click elsewhere / Esc); it may close the window. neg = the
+-- "-" key may make it negative. text_mode = a text field (letters, digits,
+-- punctuation; apply gets the string).
 function C.num_edit_open(key, value, apply, on_enter, neg, text_mode)
-    num_edit = { key = key, text = tostring(value), fresh = true, apply = apply,
+    local text = tostring(value)
+    num_edit = { key = key, text = text, pos = #text, fresh = true, apply = apply,
                  on_enter = on_enter, neg = neg == true, text_mode = text_mode == true }
+    num_blink = 0
+end
+
+-- typing replaces a selected text; returns the text left / right of the caret
+local function edit_split(e)
+    if e.fresh then e.text = ""; e.pos = 0; e.fresh = false end
+    if e.pos > #e.text then e.pos = #e.text end
+    if e.pos < 0 then e.pos = 0 end
+    return string.sub(e.text, 1, e.pos), string.sub(e.text, e.pos + 1)
+end
+
+local function edit_insert(e, str)
+    local l, r = edit_split(e)
+    e.text = l .. str .. r
+    e.pos = e.pos + #str
     num_blink = 0
 end
 
 -- typing into a text field
 local function text_edit_keys(wid, e)
+    if ga_win_key_down("LCTRL") or ga_win_key_down("RCTRL") then return end   -- Ctrl+key = no char
     local shift = ga_win_key_down("LSHIFT") or ga_win_key_down("RSHIFT")
     for _, t in ipairs(TEXT_KEYS) do
         if ga_win_key_pressed(wid, t[1]) then
-            if e.fresh then e.text = ""; e.fresh = false end
-            if #e.text < TXT_MAX_LEN then e.text = e.text .. ((shift and t[3]) or t[2]) end
-            num_blink = 0
+            if e.fresh or #e.text < TXT_MAX_LEN then edit_insert(e, (shift and t[3]) or t[2]) end
         end
     end
+end
+
+-- typing a digit into a number field (at the caret, never left of a "-")
+local function digit_edit_key(e, k)
+    if e.fresh then e.text = ""; e.pos = 0; e.fresh = false end
+    local neg = string.sub(e.text, 1, 1) == "-"
+    if neg and e.pos < 1 then e.pos = 1 end
+    local body = neg and string.sub(e.text, 2) or e.text
+    if body == "0" then                        -- a lone 0 is replaced, not prefixed
+        e.text = neg and "-" or ""
+        e.pos = #e.text
+        body = ""
+    end
+    if #body < NUM_MAX_LEN then edit_insert(e, k) end
 end
 
 -- Keyboard while a field is open. Returns true if a field was open (its keys
 -- must then not reach the search box / Esc-closes-window / Tab), and true as
 -- a 2nd value when Enter's on_enter ran (the window may be gone: stop there).
+-- Left / Right / Home / End move the caret, Backspace / Delete remove the
+-- char before / after it, Ctrl+A (or a double click) selects everything.
 function C.num_edit_keys(wid)
     local e = num_edit
     if e == nil then return false end
+    if e.pos == nil or e.pos > #e.text then e.pos = #e.text end
     if ga_win_key_pressed(wid, "ESC") then num_edit_cancel() return true end
     if ga_win_key_pressed(wid, "ENTER") then
         C.num_edit_commit()
         if e.on_enter then e.on_enter() return true, true end
         return true
     end
-    if e.text_mode then text_edit_keys(wid, e) end
-    for _, k in ipairs(e.text_mode and {} or NUM_DIGITS) do
-        if ga_win_key_pressed(wid, k) then
-            if e.fresh then e.text = ""; e.fresh = false end
-            if e.text == "0" then e.text = "" end
-            if e.text == "-0" then e.text = "-" end
-            local digits = #e.text - ((string.sub(e.text, 1, 1) == "-") and 1 or 0)
-            if digits < NUM_MAX_LEN then e.text = e.text .. k end
-            num_blink = 0
+    local ctrl = ga_win_key_down("LCTRL") or ga_win_key_down("RCTRL")
+    if ctrl and ga_win_key_pressed(wid, "A") then
+        e.fresh = (#e.text > 0); e.pos = #e.text; num_blink = 0
+        return true                            -- no "a" typed into a text field
+    end
+
+    -- caret movement (a selection collapses to its start / end first)
+    if ga_win_key_pressed_or_spammed(wid, "LEFT", 0.4, 0.04) then
+        if e.fresh then e.pos = 0 elseif e.pos > 0 then e.pos = e.pos - 1 end
+        e.fresh = false; num_blink = 0
+    end
+    if ga_win_key_pressed_or_spammed(wid, "RIGHT", 0.4, 0.04) then
+        if e.fresh then e.pos = #e.text elseif e.pos < #e.text then e.pos = e.pos + 1 end
+        e.fresh = false; num_blink = 0
+    end
+    if ga_win_key_pressed(wid, "HOME") then e.pos = 0; e.fresh = false; num_blink = 0 end
+    if ga_win_key_pressed(wid, "END") then e.pos = #e.text; e.fresh = false; num_blink = 0 end
+
+    if e.text_mode then
+        text_edit_keys(wid, e)
+    else
+        for _, k in ipairs(NUM_DIGITS) do
+            if ga_win_key_pressed(wid, k) then digit_edit_key(e, k) end
         end
     end
     -- "-" flips the sign (on a selected / empty / 0 value: start a negative one)
     if e.neg and not e.text_mode and ga_win_key_pressed(wid, "MINUS") then
         if e.fresh or e.text == "" or e.text == "0" then
-            e.text = "-"
+            e.text = "-"; e.pos = 1
         elseif string.sub(e.text, 1, 1) == "-" then
-            e.text = string.sub(e.text, 2)
+            e.text = string.sub(e.text, 2); e.pos = math.max(0, e.pos - 1)
         else
-            e.text = "-" .. e.text
+            e.text = "-" .. e.text; e.pos = e.pos + 1
         end
         e.fresh = false
         num_blink = 0
     end
     if ga_win_key_pressed_or_spammed(wid, "BACKSPACE", 0.4, 0.04) then
-        if e.fresh then e.text = "" else e.text = string.sub(e.text, 1, -2) end
-        e.fresh = false
+        if e.fresh then
+            edit_split(e)
+        elseif e.pos > 0 then
+            e.text = string.sub(e.text, 1, e.pos - 1) .. string.sub(e.text, e.pos + 1)
+            e.pos = e.pos - 1
+        end
         num_blink = 0
     end
-    if ga_win_key_pressed(wid, "DELETE") then e.text = ""; e.fresh = false end
+    if ga_win_key_pressed_or_spammed(wid, "DELETE", 0.4, 0.04) then
+        if e.fresh then
+            edit_split(e)
+        elseif e.pos < #e.text then
+            e.text = string.sub(e.text, 1, e.pos) .. string.sub(e.text, e.pos + 2)
+        end
+        num_blink = 0
+    end
     return true
 end
 
--- Left click: open the clicked amount, apply the open one when clicking
--- anywhere else. Returns true when the click landed on an amount.
+-- caret index for a click at x on target t (nearest gap between two chars)
+local function click_pos(t, x)
+    if t.cw == nil or t.cw <= 0 then return t.len or 0 end
+    local i = math.floor((x - t.tx) / t.cw + 0.5)
+    if i < 0 then i = 0 end
+    if i > (t.len or 0) then i = t.len or 0 end
+    return i
+end
+
+-- Left click: open the clicked amount with the caret where you clicked (a
+-- double click selects it all), apply the open one when clicking anywhere
+-- else. Returns true when the click landed on an amount.
 function C.num_edit_click(cursor)
     local hit = nil
     for _, t in ipairs(num_targets) do
         if cursor.x >= t.x0 and cursor.x <= t.x1 and cursor.y >= t.y0 and cursor.y <= t.y1 then hit = t end
     end
     if num_edit ~= nil and (hit == nil or hit.key ~= num_edit.key) then C.num_edit_commit() end
-    if hit ~= nil and num_edit == nil then
-        num_edit = { key = hit.key, text = tostring(hit.value), fresh = true, apply = hit.apply,
-                     neg = hit.neg, text_mode = hit.text_mode }
-        num_blink = 0
+    if hit == nil then num_last_click = nil return false end
+
+    local now = ga_get_sys_f("time.current")
+    local double = num_last_click ~= nil and num_last_click.key == hit.key
+                   and (now - num_last_click.time) <= DOUBLE_CLICK
+    num_last_click = { key = hit.key, time = now }
+    if num_edit == nil then
+        num_edit = { key = hit.key, text = tostring(hit.value), apply = hit.apply,
+                     neg = hit.neg, text_mode = hit.text_mode, empty = hit.empty }
         ga_play_sound("menu_select")
     end
-    return hit ~= nil
+    num_edit.pos = double and #num_edit.text or click_pos(hit, cursor.x)
+    num_edit.fresh = double and #num_edit.text > 0
+    if double then num_last_click = nil end
+    num_blink = 0
+    return true
 end
 
 -- Draws an amount that turns into a text box when clicked. (x, y) = bottom
@@ -143,7 +226,8 @@ end
 -- opts.max_w shrinks the chars to fit, opts.col = text colour, opts.neg = the
 -- "-" key may make it negative. opts.text = a text field (apply gets the
 -- string), opts.placeholder = dim text shown while it is empty, opts.min_w =
--- clickable width at least this.
+-- clickable width at least this, opts.empty = number applied when the field
+-- is left empty (default: an empty field changes nothing).
 -- apply(n) is called with the typed whole number. Returns the width used.
 local function num_field(wid, key, x, y, cw, ch, value, apply, opts)
     opts = opts or {}
@@ -184,13 +268,16 @@ local function num_field(wid, key, x, y, cw, ch, value, apply, opts)
     ga_win_txt(wid, x, y, shown)
     ga_win_set_front_color_default(wid)
     if editing and (num_blink % 50) < 28 then
-        local cx = x + #s * cw + 0.001
+        local pos = math.max(0, math.min(num_edit.pos or #s, #s))
+        local cx = x + pos * cw + 0.001
         ga_win_quad_color(wid, cx, y - 0.002, cx + 0.0025 / S.aspect, y + ch - 0.002, std.vec(1.0, 0.9, 0.3))
     end
 
+    -- tx / cw / len: where the chars are, so a click can put the caret there
     num_targets[#num_targets + 1] = { key = key, x0 = x0, y0 = y0, x1 = x1, y1 = y1,
+                                      tx = x, cw = cw, len = #s,
                                       value = value, apply = apply, neg = opts.neg == true,
-                                      text_mode = opts.text == true }
+                                      text_mode = opts.text == true, empty = opts.empty }
     return x1 - x
 end
 C.num_field = num_field       -- also used by the INTERACT amount strip (win_creative_lists.lua)
@@ -227,44 +314,58 @@ local ITEM_BUTTONS = {
     }},
 }
 
+-- Icarus mode on / off: the same engine switch as xar's Icarus ent
+-- (Windows/win_icarus.lua: ga_get/set_icarus_enabled, no console command)
+local function set_icarus(on)
+    if ga_set_icarus_enabled == nil then
+        ga_hud_msg("Icarus Mode: not in this game version", 2.0)
+        return
+    end
+    ga_set_icarus_enabled(on)
+    if on then ga_play_sound("holy_cow") end      -- (what xar's switch plays)
+    ga_hud_msg("Icarus Mode " .. (on and "enabled" or "disabled"), 2.0)
+end
+
+-- timed = one card per buff: L-click its name = set the timer to the card's
+-- seconds (- / + or typed, kept per buff in S.buff_secs), R-click = remove.
+-- var = the xar timer (float seconds); all_keys = every ALL_KEY_VARS timer.
 local BUFF_BUTTONS = {
-    { section = "KEYS", icon = "key_yellow", entries = {
-        { label = "Yellow Key 30s",  icon = "key_yellow", cmd = "f xar.key_time.yellow 30" },
-        { label = "Yellow Key 300s", icon = "key_yellow", cmd = "f xar.key_time.yellow 300" },
-        { label = "Blue Key 30s",    icon = "key_blue", cmd = "f xar.key_time.blue 30" },
-        { label = "Blue Key 300s",   icon = "key_blue", cmd = "f xar.key_time.blue 300" },
-        { label = "Green Key 30s",   icon = "key_green", cmd = "f xar.key_time.green 30" },
-        { label = "Green Key 300s",  icon = "key_green", cmd = "f xar.key_time.green 300" },
-        { label = "Universe Key 30s",icon = "MonsterKeyUniverse", cmd = "f xar.key_time.universe 30" },
-        { label = "Universe Key 300s",icon = "MonsterKeyUniverse", cmd = "f xar.key_time.universe 300" },
-        { label = "Laser Genesis 30s",icon = "key_laser_genesis", cmd = "f xar.key_time.laser_genesis 30" },
-        { label = "Dan's House 30s", icon = "key_dans_house", cmd = "f xar.key_time.dans_house 30" },
-        { label = "ALL Keys 60s",    icon = "key_yellow", all_keys = 60 },
+    { section = "KEYS", icon = "key_yellow", timed = true, entries = {
+        { label = "Yellow Key",    icon = "key_yellow",         var = "xar.key_time.yellow",        secs = 30 },
+        { label = "Blue Key",      icon = "key_blue",           var = "xar.key_time.blue",          secs = 30 },
+        { label = "Green Key",     icon = "key_green",          var = "xar.key_time.green",         secs = 30 },
+        -- icon_bent = use that bent's own texture (what its INTERACT tile shows)
+        { label = "Universe Key",  icon = "MonsterKeyUniverse", icon_bent = "bent_key_universe",
+          var = "xar.key_time.universe", secs = 30 },
+        { label = "Laser Genesis", icon = "key_laser_genesis",  var = "xar.key_time.laser_genesis", secs = 30 },
+        { label = "Dan's House",   icon = "key_dans_house",     var = "xar.key_time.dans_house",    secs = 30 },
+        { label = "ALL Keys",      icon = "key_yellow",         all_keys = true,                    secs = 60 },
     }},
-    { section = "POWERUPS", icon = "icon_damage_5x", entries = {
-        { label = "5x Damage 30s",   icon = "icon_damage_5x", cmd = "f xar.damage_5x_stacking_time 30" },
-        { label = "5x Damage 120s",  icon = "icon_damage_5x", cmd = "f xar.damage_5x_stacking_time 120" },
-        { label = "5x Damage 600s",  icon = "icon_damage_5x", cmd = "f xar.damage_5x_stacking_time 600" },
-        { label = "Invulnerable 30s",icon = "icon_invun", cmd = "f xar.invun_stacking_time 30" },
-        { label = "Invulnerable 120s",icon = "icon_invun", cmd = "f xar.invun_stacking_time 120" },
-        { label = "Invulnerable 600s",icon = "icon_invun", cmd = "f xar.invun_stacking_time 600" },
-        { label = "5x XP 30s",       icon = "icon_xp_5x", cmd = "f xar.xp_5x_stacking_time 30" },
-        { label = "5x XP 120s",      icon = "icon_xp_5x", cmd = "f xar.xp_5x_stacking_time 120" },
-        { label = "5x XP 600s",      icon = "icon_xp_5x", cmd = "f xar.xp_5x_stacking_time 600" },
+    { section = "POWERUPS", icon = "icon_damage_5x", timed = true, entries = {
+        { label = "5x Damage",     icon = "icon_damage_5x", var = "xar.damage_5x_stacking_time", secs = 30 },
+        { label = "Invulnerable",  icon = "icon_invun",     var = "xar.invun_stacking_time",     secs = 30 },
+        { label = "5x XP",         icon = "icon_xp_5x",     var = "xar.xp_5x_stacking_time",     secs = 30 },
     }},
     { section = "CHEATS (toggle)", icon = "skull", entries = {
         -- engine console toggles; do NOT ga_set_sys_b metagame.cheat.* (READ ONLY = native crash).
         -- toggle = key into CHEAT_STATE: the button shows ON / OFF and runs
-        -- `on` (L-click while off / unknown) or `off` (L-click while on, R-click).
+        -- `on` (L-click while off / unknown) or `off` (L-click while on, R-click),
+        -- or calls set(true / false) instead when the entry has one.
         { label = "Cheats",    icon = "skull",               toggle = "cheats",
           on = "cheat hodisclosetov;if $metagame.cheat.enabled void (cheat on)", off = "cheat off" },
         { label = "God Mode",  icon = "icon_shield",         toggle = "god",       on = "god on",       off = "god off" },
         { label = "Noclip",    icon = "icon_pacifist",       toggle = "noclip",    on = "noclip on",    off = "noclip off" },
         { label = "ShrinkAny", icon = "icon_shrink_warning", toggle = "shrinkany", on = "shrinkany on", off = "shrinkany off" },
+        { label = "Icarus Mode", icon = "icarus",            toggle = "icarus",    set = set_icarus },
         -- hotbar entries: L-click in build mode = touching a pink / blue ring
         -- (game_creative.lua use_path)
         { label = "Pink Path", icon = "ring_pink", path = "pink" },
         { label = "Blue Path", icon = "ring_blue", path = "blue" },
+        -- hotbar entries: L-click in build mode runs them (game_creative_place.lua
+        -- use_action); labels / icons = C.ACTIONS in win_creative_core.lua
+        { label = "Screenshot", icon = "creative_screenshot", action = "screenshot" },
+        { label = "Save",       icon = "icon_save",           action = "save" },
+        { label = "Respawn",    icon = "respawn_active",      action = "respawn" },
     }},
 }
 
@@ -301,6 +402,10 @@ end
 local function cheat_state(key)
     if key == "cheats" then return ga_get_sys_b("metagame.cheat.enabled") == true end
     if key == "god"    then return ga_get_sys_b("metagame.cheat.god") == true end
+    if key == "icarus" then
+        if ga_get_icarus_enabled == nil then return nil end
+        return ga_get_icarus_enabled() == true
+    end
     local c = CHEAT_COPY[key]
     if c == nil or not ga_exists(c.var) then return nil end
     local v = ga_get_i(c.var)
@@ -310,7 +415,11 @@ end
 
 local function run_cheat_toggle(e)
     local on = cheat_state(e.toggle)
-    ga_command((on == true) and e.off or e.on)
+    if e.set then
+        e.set(on ~= true)
+    else
+        ga_command((on == true) and e.off or e.on)
+    end
     poll_cheats(true)       -- re-read right away (the command runs synchronously or by next poll)
 end
 
@@ -319,50 +428,131 @@ local ALL_KEY_VARS = {
     "xar.key_time.universe", "xar.key_time.laser_genesis", "xar.key_time.dans_house",
 }
 
--- the BUFFS button under the cursor (same layout as render_buffs_tab)
-local function buff_hit(cursor)
-    local by = 0.78
+-- BUFFS layout, one function for render + input:
+--   cb("header", section, x, y)        section title (text bottom at y)
+--   cb("entry", e, x, y, w, h, timed)  a button / timed card (bottom left x, y)
+local BUFF_TOP, TIMED_COLS, TIMED_GAP = 0.78, 3, 0.010
+local function buffs_layout(cb)
+    local by = BUFF_TOP
     for _, section in ipairs(BUFF_BUTTONS) do
+        cb("header", section, 0.03, by)
         by = by - 0.04
+        local bw, bh, row, gap = 0.175, 0.030, 0.035, 0.005
+        if section.timed then
+            bw = (0.94 - TIMED_GAP * (TIMED_COLS - 1)) / TIMED_COLS
+            bh, row, gap = 0.034, 0.042, TIMED_GAP
+        end
         local bx = 0.03
         for _, e in ipairs(section.entries) do
-            local bw, bh = 0.175, 0.030
-            if bx + bw > 0.97 then
+            if bx + bw > 0.97 + 1e-6 then
                 bx = 0.03
-                by = by - 0.035
+                by = by - row
             end
-            if C.btn_rect(cursor, bx, by - bh, bw, bh) then return e end
-            bx = bx + bw + 0.005
+            cb("entry", e, bx, by - bh, bw, bh, section.timed == true)
+            bx = bx + bw + gap
         end
-        by = by - 0.075
+        by = by - 0.075 - (section.timed and (bh - 0.030) or 0)
     end
-    return nil
+    return by
+end
+
+-- a timed card's parts: give (icon + name), minus, value (the seconds), plus
+local function timed_parts(x, y, w, h)
+    local pw, vw, pad = 0.024, 0.066, 0.004
+    local iy, ih = y + pad, h - 2 * pad
+    local px = x + w - pad - pw
+    local vx = px - pad - vw
+    local mx = vx - pad - pw
+    return {
+        give  = { x, y, mx - 0.006 - x, h },
+        minus = { mx, iy, pw, ih },
+        value = { vx, iy, vw, ih },
+        plus  = { px, iy, pw, ih },
+    }
+end
+
+-- the BUFFS entry under the cursor, and which part of a timed card
+-- ("give" / "minus" / "value" / "plus"; "btn" for the plain buttons)
+local function buff_hit(cursor)
+    local hit_e, hit_part = nil, nil
+    buffs_layout(function(kind, e, x, y, w, h, timed)
+        if kind ~= "entry" or hit_e ~= nil or not C.btn_rect(cursor, x, y, w, h) then return end
+        hit_e, hit_part = e, "btn"
+        if timed then
+            hit_part = "give"
+            for name, r in pairs(timed_parts(x, y, w, h)) do
+                if name ~= "give" and C.btn_rect(cursor, r[1], r[2], r[3], r[4]) then hit_part = name end
+            end
+        end
+    end)
+    return hit_e, hit_part
+end
+
+-- seconds a timed card gives
+S.buff_secs = S.buff_secs or {}
+local BUFF_SECS_MAX = 99999999
+local function buff_secs(e)
+    local v = S.buff_secs[e.label]
+    if v == nil then v = e.secs or 30 end
+    return v
+end
+local function buff_secs_set(e, v)
+    v = math.floor(tonumber(v) or 0)
+    if v < 1 then v = 1 end
+    if v > BUFF_SECS_MAX then v = BUFF_SECS_MAX end
+    S.buff_secs[e.label] = v
+end
+
+-- - / + step: nothing held 10, Ctrl 100, Shift 1K, Ctrl+Shift 10K (same keys
+-- as the INTERACT amounts; no Alt: not in the window key table)
+local function buff_step()
+    local ctrl  = ga_win_key_down("LCTRL") or ga_win_key_down("RCTRL")
+    local shift = ga_win_key_down("LSHIFT") or ga_win_key_down("RSHIFT")
+    if ctrl and shift then return 10000 end
+    if shift then return 1000 end
+    if ctrl then return 100 end
+    return 10
+end
+
+-- L-click a timed card's name: set its timer(s) to the card's seconds
+local function give_timed(e)
+    local secs = buff_secs(e)
+    local vars = e.all_keys and ALL_KEY_VARS or { e.var }
+    local n = 0
+    for _, var in ipairs(vars) do
+        if ga_exists(var) then ga_set_f(var, secs); n = n + 1 end
+    end
+    if n == 0 then ga_hud_msg(e.label .. ": not in this game version", 1.5) return end
+    ga_hud_msg(e.label .. " " .. secs .. "s", 1.5)
 end
 
 -- R-click: take that buff away (timer -> 0) / turn the cheat off
 local function remove_buff(e)
-    local name = (string.gsub(e.label, "%s+%d+s$", ""))     -- "Yellow Key 30s" -> "Yellow Key"
+    local name = e.label
     if e.toggle then
         if cheat_state(e.toggle) == false then
             ga_hud_msg(e.label .. " is already off", 1.5)
             ga_play_sound("menu_back")
             return
         end
-        ga_command(e.off)                 -- explicit "x off" (or "cheat off")
+        if e.set then
+            e.set(false)                  -- (shows its own message)
+        else
+            ga_command(e.off)             -- explicit "x off" (or "cheat off")
+            ga_hud_msg(e.label .. " off", 1.5)
+        end
         poll_cheats(true)
-        ga_hud_msg(e.label .. " off", 1.5)
     elseif e.all_keys then
         for _, var in ipairs(ALL_KEY_VARS) do
             if ga_exists(var) then ga_set_f(var, 0.0) end
         end
         ga_hud_msg("All keys removed", 1.5)
-    elseif e.cmd then
-        local var = string.match(e.cmd, "^%S+%s+(%S+)")
-        if var == nil or not ga_exists(var) then return end
-        ga_set_f(var, 0.0)
+    elseif e.var then
+        if not ga_exists(e.var) then return end
+        ga_set_f(e.var, 0.0)
         ga_hud_msg(name .. " removed", 1.5)
     else
-        return                            -- paths: nothing to remove
+        return                            -- paths / actions: nothing to remove
     end
     ga_play_sound("menu_back")
 end
@@ -715,6 +905,129 @@ local function mode_chip_hovered(n, cursor)
     return hit
 end
 
+-------------------------------------------------------------------------------
+-- Telekinesis upgrades (ITEMS tab). In the game each one comes from an
+-- "Upgrade Telekinesis" station (xar BasicEnts/Store/bent_upgrade_telekinesis:
+-- ga_set_b on its var) and adds +1 block radius / -1 s free cooldown
+-- (xar Game/game_telekinesis.lua). xar globals.txt declares the vars as
+-- "b game.globals.xar.player.telekinesis.<name>" and xar reads them with that
+-- same string, so we do too.
+-------------------------------------------------------------------------------
+
+local TELE_UPGRADES = {   -- { api name, xar's display name }, in game_telekinesis order
+    { "stone_corral",             "Stone Corral (Richmond, in Midway)" },
+    { "huntington",               "Huntington (Midway)" },
+    { "starksboro",               "Starksboro (I3)" },
+    { "desert_flower_cloud",      "Desert Flower Secret (I3)" },
+    { "tangerine",                "Tangerine (I3)" },
+    { "super_massive_black_hole", "Super Massive Black Hole (Space)" },
+    { "top_of_world",             "Top of the World" },
+    { "absolute_infinite",        "Absolute Infinite" },
+    { "secret_farmhouse",         "Secret Farmhouse" },
+    { "main_branch_lib",          "Main Branch Library (Mylantis)" },
+    { "mylantis_great_cavern",    "Mylantis Great Cavern (Mylantis)" },
+    { "beta_sponge",              "Beta Menger Sponge (Mylantis)" },
+}
+-- game_telekinesis get_radius_base / get_free_cooldown_base
+local TELE_RADIUS_BASE, TELE_COOLDOWN_BASE = 24, 30
+
+local function tele_var(name) return "game.globals.xar.player.telekinesis." .. name end
+local function tele_has(name)
+    local var = tele_var(name)
+    return ga_exists(var) and ga_get_b(var) == true
+end
+-- false when this game version doesn't have that upgrade
+local function tele_set(name, value)
+    local var = tele_var(name)
+    if not ga_exists(var) then return false end
+    ga_set_b(var, value)
+    return true
+end
+local function tele_count()
+    local n = 0
+    for _, u in ipairs(TELE_UPGRADES) do
+        if tele_has(u[1]) then n = n + 1 end
+    end
+    return n
+end
+
+local function tele_unlock(u)
+    if tele_has(u[1]) then
+        ga_play_sound("menu_select")
+        ga_hud_msg("Telekinesis: " .. u[2] .. " is already unlocked", 2.0)
+    elseif tele_set(u[1], true) then
+        ga_play_sound("oh_yeah")                  -- (what the upgrade station plays)
+        ga_hud_msg("Telekinesis upgrade: " .. u[2], 2.5)
+    else
+        ga_play_sound("menu_back")
+        ga_hud_msg("Telekinesis: " .. u[2] .. " is not in this game version", 2.5)
+    end
+end
+
+local function tele_lock(u)
+    if not tele_has(u[1]) then return end
+    tele_set(u[1], false)
+    ga_play_sound("menu_select")
+    ga_hud_msg("Telekinesis: locked " .. u[2], 2.0)
+end
+
+local function tele_unlock_all()
+    local got = 0
+    for _, u in ipairs(TELE_UPGRADES) do
+        if not tele_has(u[1]) and tele_set(u[1], true) then got = got + 1 end
+    end
+    ga_play_sound((got > 0) and "oh_yeah" or "menu_select")
+    ga_hud_msg("All telekinesis upgrades unlocked" .. ((got > 0) and (" (+" .. got .. ")") or " (had them all)"), 2.5)
+end
+
+local function tele_lock_all()
+    local n = 0
+    for _, u in ipairs(TELE_UPGRADES) do
+        if tele_has(u[1]) then tele_set(u[1], false); n = n + 1 end
+    end
+    ga_play_sound("menu_select")
+    ga_hud_msg("Telekinesis upgrades locked" .. ((n > 0) and (" (-" .. n .. ")") or " (had none)"), 2.5)
+end
+
+-- panel under the ITEMS rows (they end with the XP line at ~0.42)
+local TELE_Y0, TELE_Y1 = 0.080, 0.395
+local TELE_X0, TELE_X1 = 0.04, 0.96
+local TELE_BTN_W, TELE_BTN_H, TELE_BTN_GAP, TELE_BTN_TOP = 0.112, 0.030, 0.008, 0.387
+local TELE_CHIP_H, TELE_CHIP_GAP, TELE_CHIP_TOP, TELE_CHIP_ROW = 0.028, 0.010, 0.345, 0.036
+local TELE_BUTTONS = {
+    { label = "Unlock All", fn = tele_unlock_all },
+    { label = "Lock All",   fn = tele_lock_all },
+}
+
+local function tele_buttons_layout(cb)
+    local n = #TELE_BUTTONS
+    local bx = TELE_X1 - n * TELE_BTN_W - (n - 1) * TELE_BTN_GAP
+    for _, b in ipairs(TELE_BUTTONS) do
+        cb(b, bx, TELE_BTN_TOP - TELE_BTN_H, TELE_BTN_W, TELE_BTN_H)
+        bx = bx + TELE_BTN_W + TELE_BTN_GAP
+    end
+end
+
+-- 2 columns, filled top to bottom (Midway / I3 / Space left, the rest right)
+local function tele_chips_layout(cb)
+    local rows = math.ceil(#TELE_UPGRADES / 2)
+    local cw = (TELE_X1 - TELE_X0 - TELE_CHIP_GAP) / 2
+    for i, u in ipairs(TELE_UPGRADES) do
+        local col, row = math.floor((i - 1) / rows), (i - 1) % rows
+        local x = TELE_X0 + col * (cw + TELE_CHIP_GAP)
+        local top = TELE_CHIP_TOP - row * TELE_CHIP_ROW
+        cb(u, x, top - TELE_CHIP_H, cw, TELE_CHIP_H)
+    end
+end
+
+local function tele_chip_hovered(cursor)
+    local hit = nil
+    tele_chips_layout(function(u, x, y, w, h)
+        if C.btn_rect(cursor, x, y, w, h) then hit = u end
+    end)
+    return hit
+end
+
 -- ITEMS / BUFFS / WEAPONS clicks. Returns true when the window was closed.
 function C.panels_input(wid)
 
@@ -738,30 +1051,44 @@ function C.panels_input(wid)
             end
             by = by - 0.07
         end
+        -- telekinesis: Unlock All / Lock All, L-click a locked upgrade = unlock it
+        tele_buttons_layout(function(b, bx, by2, bw, bh)
+            if C.btn_rect(cursor, bx, by2, bw, bh) then b.fn() end
+        end)
+        local u = tele_chip_hovered(cursor)
+        if u then tele_unlock(u) end
+    end
+    -- R-click a telekinesis upgrade = lock it again
+    if S.cur_tab == C.TAB_ITEMS and ga_win_mouse_pressed(wid, false) then
+        local u = tele_chip_hovered(ga_win_get_cursor_pos(wid))
+        if u then tele_lock(u) end
     end
 
     -- BUFFS: L-click = give / toggle, R-click = remove that buff / turn it off
     if S.cur_tab == C.TAB_BUFFS and ga_win_mouse_pressed(wid, true) then
-        local e = buff_hit(ga_win_get_cursor_pos(wid))
-        if e ~= nil then
+        local e, part = buff_hit(ga_win_get_cursor_pos(wid))
+        if e ~= nil and part ~= "value" then       -- (the seconds: num_field opens it)
             if e.path then
                 C.pick_and_build("path", e.path, e.label)   -- pops the window
                 return true
+            elseif e.action then
+                C.pick_and_build("action", e.action, e.label)
+                return true
             elseif e.toggle then
                 run_cheat_toggle(e)
-            elseif e.raw then
-                ga_command(e.raw)
-            elseif e.all_keys then
-                for _, var in ipairs(ALL_KEY_VARS) do C.set_var("f " .. var .. " " .. e.all_keys) end
-            else
-                C.set_var(e.cmd)
+            elseif part == "minus" then
+                buff_secs_set(e, buff_secs(e) - buff_step())
+            elseif part == "plus" then
+                buff_secs_set(e, buff_secs(e) + buff_step())
+            elseif e.secs then
+                give_timed(e)
             end
             ga_play_sound("menu_select")
         end
     end
     if S.cur_tab == C.TAB_BUFFS and ga_win_mouse_pressed(wid, false) then
-        local e = buff_hit(ga_win_get_cursor_pos(wid))
-        if e ~= nil then remove_buff(e) end
+        local e, part = buff_hit(ga_win_get_cursor_pos(wid))
+        if e ~= nil and (part == "give" or part == "btn") then remove_buff(e) end
     end
 
     -- mouse wheel cycles the selected weapon (down = next, like the hotbar)
@@ -834,6 +1161,26 @@ local function draw_wep_btn(wid, cursor, bx, by, bw, bh, label, active)
     ga_win_set_front_color_default(wid)
 end
 
+-- a fire mode / telekinesis upgrade chip: name on the left (cut to fit),
+-- optional tag (PRIMARY, LOCKED, ...) on the right
+local function draw_chip(wid, x, y, w, h, name, txt, border, bg, tag, tagcol)
+    local pad = C.default_padding
+    ga_win_quad_color(wid, x - C.fix_padding(pad), y - pad, x + w + C.fix_padding(pad), y + h + pad, border)
+    ga_win_quad_color(wid, x, y, x + w, y + h, bg)
+    local tag_w = 0
+    if tag then
+        tag_w = #tag * 0.0075
+        ga_win_set_char_size(wid, 0.0075, 0.015)
+        ga_win_set_front_color(wid, tagcol)
+        ga_win_txt(wid, x + w - 0.008 - tag_w, y + h * 0.5 - 0.007, tag)
+    end
+    local cw = 0.0085
+    ga_win_set_char_size(wid, cw, 0.017)
+    ga_win_set_front_color(wid, txt)
+    ga_win_txt(wid, x + 0.008, y + h * 0.5 - 0.008, C.fit(name, math.floor((w - 0.024 - tag_w) / cw)))
+    ga_win_set_front_color_default(wid)
+end
+
 local function render_modes_panel(wid, cursor)
     local n = S.sel_weapon
     local count = wep_mode_count(n)
@@ -890,42 +1237,56 @@ local function render_modes_panel(wid, cursor)
             txt    = std.vec(0.50, 0.50, 0.55)
             tag, tagcol = "LOCKED", std.vec(0.80, 0.38, 0.32)
         end
-        local pad = C.default_padding
-        ga_win_quad_color(wid, x - C.fix_padding(pad), y - pad, x + w + C.fix_padding(pad), y + h + pad, border)
-        ga_win_quad_color(wid, x, y, x + w, y + h, bg)
-        local tag_w = 0
-        if tag then
-            tag_w = #tag * 0.0075
-            ga_win_set_char_size(wid, 0.0075, 0.015)
-            ga_win_set_front_color(wid, tagcol)
-            ga_win_txt(wid, x + w - 0.008 - tag_w, y + h * 0.5 - 0.007, tag)
-        end
-        local cw = 0.0085
-        ga_win_set_char_size(wid, cw, 0.017)
-        ga_win_set_front_color(wid, txt)
-        ga_win_txt(wid, x + 0.008, y + h * 0.5 - 0.008,
-            C.fit(wep_mode_name(n, m), math.floor((w - 0.024 - tag_w) / cw)))
-        ga_win_set_front_color_default(wid)
+        draw_chip(wid, x, y, w, h, wep_mode_name(n, m), txt, border, bg, tag, tagcol)
+    end)
+    -- (what clicking a mode does: see the ? help)
+end
+
+-- ITEMS tab: TELEKINESIS UPGRADES panel
+local function render_tele_panel(wid, cursor)
+    panel(wid, 0.02, TELE_Y0, 0.98, TELE_Y1)
+
+    -- header: icon, title, "x / 12 unlocked", buttons on the right
+    local mid = TELE_BTN_TOP - TELE_BTN_H * 0.5
+    local hx = TELE_X0 + 0.005
+    local hw = C.draw_icon(wid, hx, mid - 0.015, 0.030, "upgrade_telekinesis", true)
+    if hw > 0 then hx = hx + hw + 0.010 end
+    local title = "TELEKINESIS UPGRADES"
+    ga_win_set_char_size(wid, 0.011, 0.022)
+    ga_win_set_front_color(wid, std.vec(1.0, 0.7, 0.3))
+    ga_win_txt(wid, hx, mid - 0.009, title)
+    local n = tele_count()
+    ga_win_set_char_size(wid, 0.009, 0.018)
+    ga_win_set_front_color(wid, std.vec(0.55, 0.80, 0.95))
+    ga_win_txt(wid, hx + #title * 0.011 + 0.015, mid - 0.008, n .. " / " .. #TELE_UPGRADES .. " unlocked")
+    ga_win_set_front_color_default(wid)
+
+    tele_buttons_layout(function(b, bx, by, bw, bh)
+        draw_wep_btn(wid, cursor, bx, by + bh, bw, bh, b.label, false)
     end)
 
-    -- what a click on the hovered chip does
-    local hint
-    if hov_m then
-        local nm = wep_mode_name(n, hov_m)
-        if mode_equipped(n, hov_m) then
-            hint = nm .. " is equipped (" .. ((eq[1] == hov_m) and "primary" or "secondary")
-                .. " fire). Equip another mode to swap it out."
-        elseif mode_has(n, hov_m) then
-            hint = "L-click: equip " .. nm .. " (keeps " .. wep_mode_name(n, equip_keeps(n)) .. ")   R-click: lock it"
+    -- one chip per upgrade: unlocked = green, locked = dark + LOCKED
+    tele_chips_layout(function(u, x, y, w, h)
+        local hovering = C.btn_rect(cursor, x, y, w, h)
+        if tele_has(u[1]) then
+            draw_chip(wid, x, y, w, h, u[2], std.vec(0.75, 1.0, 0.75), std.vec(0.30, 0.85, 0.40),
+                hovering and std.vec(0.14, 0.38, 0.18) or std.vec(0.10, 0.30, 0.14),
+                "UNLOCKED", std.vec(0.45, 1.0, 0.55))
         else
-            hint = "L-click: unlock " .. nm
+            draw_chip(wid, x, y, w, h, u[2], std.vec(0.50, 0.50, 0.55),
+                hovering and std.vec(1.0, 0.9, 0.3) or std.vec(0.25, 0.25, 0.30),
+                hovering and std.vec(0.20, 0.18, 0.12) or std.vec(0.10, 0.10, 0.13),
+                "LOCKED", std.vec(0.80, 0.38, 0.32))
         end
-    else
-        hint = "L-click a mode: unlock it / equip it (2 are equipped: primary + secondary fire)   R-click: lock it"
-    end
-    ga_win_set_char_size(wid, 0.0075, 0.015)
-    ga_win_set_front_color(wid, std.vec(0.55, 0.55, 0.62))
-    ga_win_txt(wid, MODES_X0, MODES_Y0 + 0.008, C.fit(hint, math.floor((MODES_X1 - MODES_X0) / 0.0075)))
+    end)
+
+    -- what they add up to (game_telekinesis get_radius / get_free_cooldown)
+    ga_win_set_char_size(wid, 0.009, 0.018)
+    ga_win_set_front_color(wid, std.vec(0.55, 0.80, 0.95))
+    ga_win_txt(wid, TELE_X0 + 0.005, TELE_Y0 + 0.016,
+        "Radius " .. TELE_RADIUS_BASE .. " + " .. n .. " = " .. (TELE_RADIUS_BASE + n) .. " blocks"
+        .. "      Free telekinesis cooldown " .. TELE_COOLDOWN_BASE .. " - " .. n .. " = "
+        .. (TELE_COOLDOWN_BASE - n) .. " s")
     ga_win_set_front_color_default(wid)
 end
 
@@ -1111,10 +1472,9 @@ function C.render_items_tab(wid)
     local xp_level = ga_get_i("xar.experience.level")
     local xp_tnl = ga_get_i("xar.experience.to_next_level")
     ga_win_txt(wid, 0.03, by - 0.012, "XP Level: " .. tostring(xp_level) .. "   To Next: " .. tostring(xp_tnl))
-    ga_win_set_front_color(wid, std.vec(0.5, 0.5, 0.5))
-    ga_win_set_char_size(wid, 0.008, 0.016)
-    ga_win_txt(wid, 0.03, by - 0.045, "Click a number to type an exact amount (Enter = set, Esc = cancel)")
     ga_win_set_front_color_default(wid)
+
+    render_tele_panel(wid, cursor)
 end
 
 function C.render_buffs_tab(wid)
@@ -1124,66 +1484,81 @@ function C.render_buffs_tab(wid)
     ga_win_set_front_color_default(wid)
 
     local cursor = ga_win_get_cursor_pos(wid)
-    local by = 0.78
     poll_cheats(false)
+    local step = buff_step()
 
-    local hint = "L-click = give / turn on    R-click = remove / turn off"
-    ga_win_set_char_size(wid, 0.008, 0.016)
-    ga_win_set_front_color(wid, std.vec(0.55, 0.55, 0.62))
-    ga_win_txt(wid, 0.97 - #hint * 0.008, by, hint)
-    ga_win_set_front_color_default(wid)
-
-    for _, section in ipairs(BUFF_BUTTONS) do
-        local hx = 0.03
-        local hw = section.icon and C.draw_icon(wid, hx, by - 0.005, 0.030, section.icon, true) or 0
-        if hw > 0 then hx = hx + hw + 0.008 end
-        ga_win_set_char_size(wid, 0.011, 0.022)
-        ga_win_set_front_color(wid, std.vec(1.0, 0.7, 0.3))
-        ga_win_txt(wid, hx, by, section.section)
-        ga_win_set_front_color_default(wid)
-        by = by - 0.04
-
-        local bx = 0.03
-        ga_win_set_char_size(wid, 0.008, 0.016)
-        for _, e in ipairs(section.entries) do
-            local bw = 0.175
-            local bh = 0.030
-            if bx + bw > 0.97 then
-                bx = 0.03
-                by = by - 0.035
-            end
-            local hovering = C.btn_rect(cursor, bx, by - bh, bw, bh)
-            local col = hovering and std.vec(0.5, 0.4, 0.6) or std.vec(0.25, 0.20, 0.30)
-            local border = std.vec(0.40, 0.30, 0.50)
-            local on = nil
-            if e.toggle then
-                on = cheat_state(e.toggle)
-                if on == true then           -- same green as an equipped fire mode
-                    border = std.vec(0.30, 0.85, 0.40)
-                    col = hovering and std.vec(0.14, 0.38, 0.18) or std.vec(0.10, 0.30, 0.14)
-                end
-            end
-            local padding = C.default_padding
-            ga_win_quad_color(wid, bx - C.fix_padding(padding), by - bh - padding, bx + bw + C.fix_padding(padding), by + padding, border)
-            ga_win_quad_color(wid, bx, by - bh, bx + bw, by, col)
-            local lx = bx + 0.004
-            local iw = e.icon and C.draw_icon(wid, lx, by - bh + 0.004, bh - 0.008, e.icon, false) or 0
-            if iw > 0 then lx = lx + iw + 0.005 end
-            ga_win_set_char_size(wid, 0.008, 0.016)
-            ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
-            ga_win_txt(wid, lx, by - bh + 0.007, e.label)
-            if e.toggle then                 -- ON / OFF / ? tag on the right
-                local tag = (on == true) and "ON" or ((on == false) and "OFF" or "?")
-                local tcol = (on == true) and std.vec(0.45, 1.0, 0.55)
-                          or ((on == false) and std.vec(0.80, 0.38, 0.32) or std.vec(0.6, 0.6, 0.6))
-                ga_win_set_front_color(wid, tcol)
-                ga_win_txt(wid, bx + bw - 0.006 - #tag * 0.008, by - bh + 0.007, tag)
+    local by = buffs_layout(function(kind, e, x, y, w, h, timed)
+        if kind == "header" then
+            local section = e
+            local hx = x
+            local hw = section.icon and C.draw_icon(wid, hx, y - 0.005, 0.030, section.icon, true) or 0
+            if hw > 0 then hx = hx + hw + 0.008 end
+            ga_win_set_char_size(wid, 0.011, 0.022)
+            ga_win_set_front_color(wid, std.vec(1.0, 0.7, 0.3))
+            ga_win_txt(wid, hx, y, section.section)
+            if section.timed then            -- current - / + step (changes with Ctrl / Shift)
+                local s = "- / + " .. C.fmt_int(step) .. "s"
+                ga_win_set_char_size(wid, 0.008, 0.016)
+                ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
+                ga_win_txt(wid, hx + #section.section * 0.011 + 0.020, y + 0.002, s)
             end
             ga_win_set_front_color_default(wid)
-            bx = bx + bw + 0.005
+            return
         end
-        by = by - 0.075
-    end
+
+        local parts = timed and timed_parts(x, y, w, h) or nil
+        local g = parts and parts.give or { x, y, w, h }
+        local hovering = C.btn_rect(cursor, g[1], g[2], g[3], g[4])
+        local col = hovering and std.vec(0.5, 0.4, 0.6) or std.vec(0.25, 0.20, 0.30)
+        local border = std.vec(0.40, 0.30, 0.50)
+        local on = nil
+        if e.toggle then
+            on = cheat_state(e.toggle)
+            if on == true then               -- same green as an equipped fire mode
+                border = std.vec(0.30, 0.85, 0.40)
+                col = hovering and std.vec(0.14, 0.38, 0.18) or std.vec(0.10, 0.30, 0.14)
+            end
+        end
+        local padding = C.default_padding
+        ga_win_quad_color(wid, x - C.fix_padding(padding), y - padding, x + w + C.fix_padding(padding), y + h + padding, border)
+        ga_win_quad_color(wid, x, y, x + w, y + h, timed and std.vec(0.25, 0.20, 0.30) or col)
+        if timed and hovering then ga_win_quad_color(wid, g[1], g[2], g[1] + g[3], g[2] + g[4], col) end
+
+        local lx = x + 0.004
+        local icon = e.icon
+        if e.icon_bent then
+            local bt = C.valid_tex(C.bent_tex(e.icon_bent))
+            if bt ~= "" then icon = bt end
+        end
+        local iw = icon and C.draw_icon(wid, lx, y + 0.004, h - 0.008, icon, false) or 0
+        if iw > 0 then lx = lx + iw + 0.005 end
+        ga_win_set_char_size(wid, 0.008, 0.016)
+        ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
+        local maxc = math.max(4, math.floor((g[1] + g[3] - 0.004 - lx) / 0.008))
+        ga_win_txt(wid, lx, y + h * 0.5 - 0.008, C.fit(e.label, maxc))
+        if e.toggle then                     -- ON / OFF / ? tag on the right
+            local tag = (on == true) and "ON" or ((on == false) and "OFF" or "?")
+            local tcol = (on == true) and std.vec(0.45, 1.0, 0.55)
+                      or ((on == false) and std.vec(0.80, 0.38, 0.32) or std.vec(0.6, 0.6, 0.6))
+            ga_win_set_front_color(wid, tcol)
+            ga_win_txt(wid, x + w - 0.006 - #tag * 0.008, y + h * 0.5 - 0.008, tag)
+        end
+        ga_win_set_front_color_default(wid)
+
+        if timed then                        -- - [seconds] s +
+            local m, v, pl = parts.minus, parts.value, parts.plus
+            C.small_btn(wid, cursor, m[1], m[2], m[3], m[4], "-", false)
+            C.small_btn(wid, cursor, pl[1], pl[2], pl[3], pl[4], "+", false)
+            ga_win_quad_color(wid, v[1], v[2], v[1] + v[3], v[2] + v[4], std.vec(0.03, 0.03, 0.06))
+            num_field(wid, "buff:" .. e.label, v[1] + 0.005, v[2] + v[4] * 0.5 - 0.007, 0.008, 0.016,
+                buff_secs(e), function(n) buff_secs_set(e, n) end,
+                { max_w = v[3] - 0.022, min_w = v[3] - 0.022, col = std.vec(1.0, 0.9, 0.3) })
+            ga_win_set_char_size(wid, 0.008, 0.016)
+            ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
+            ga_win_txt(wid, v[1] + v[3] - 0.012, v[2] + v[4] * 0.5 - 0.007, "s")
+            ga_win_set_front_color_default(wid)
+        end
+    end)
 
     by = by - 0.03
     ga_win_set_char_size(wid, 0.009, 0.018)
@@ -1204,10 +1579,11 @@ function C.render_buffs_tab(wid)
     show_timer("Green Key",      "xar.key_time.green")
     show_timer("Universe Key",   "xar.key_time.universe")
 
-    -- "CHEATS: ON   GOD MODE: ON   NOCLIP: OFF   SHRINKANY: ON"
+    -- "CHEATS: ON   GOD MODE: ON   NOCLIP: OFF   SHRINKANY: ON   ICARUS: OFF"
     timer_y = timer_y - 0.01
     local sx = 0.03
-    for _, s in ipairs({ { "CHEATS", "cheats" }, { "GOD MODE", "god" }, { "NOCLIP", "noclip" }, { "SHRINKANY", "shrinkany" } }) do
+    for _, s in ipairs({ { "CHEATS", "cheats" }, { "GOD MODE", "god" }, { "NOCLIP", "noclip" },
+                         { "SHRINKANY", "shrinkany" }, { "ICARUS", "icarus" } }) do
         local on = cheat_state(s[2])
         local txt = s[1] .. ": " .. ((on == true) and "ON" or ((on == false) and "OFF" or "?"))
         ga_win_set_front_color(wid, (on == true) and std.vec(0.4, 1.0, 0.4) or std.vec(0.6, 0.6, 0.6))
@@ -1226,6 +1602,7 @@ end
 function C.num_reset()
     num_edit = nil
     num_targets = {}
+    num_last_click = nil
 end
 
 -- not a real window: only here so the window Lua state loads it

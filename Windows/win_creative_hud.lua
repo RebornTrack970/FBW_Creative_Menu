@@ -8,7 +8,8 @@ creative_ui.state = creative_ui.state or {}
 local C, S = creative_ui, creative_ui.state
 
 local HB_SLOT_H, HB_BOTTOM = 0.090, 0.016
-local HB_TAG = { ment = "MOB", bent = "INT", picture = "PIC", trophy = "TRO", secret = "SEC", path = "TP" }
+local HB_TAG = { ment = "MOB", bent = "INT", picture = "PIC", trophy = "TRO", secret = "SEC", path = "TP",
+                 schem = "SCH" }
 
 local function inner_aspect()
     local a = ga_get_sys_f("display.camera_params.a_ratio.value")
@@ -127,21 +128,31 @@ local function render_hotbar(wid)
 
     -- controls hint above the name
     local hint
-    if kind == nil then
+    local alt  = ga_exists(C.ALT_VAR) and ga_get_b(C.ALT_VAR)
+    local area = ga_exists(C.AREA_VAR) and ga_get_s(C.AREA_VAR) or ""
+    if alt and area ~= "" and kind ~= "block" then
+        -- a schematic box being picked (Alt+middle-click) with any other slot
+        hint = "Box " .. area .. "   MMB = save as schematic   Alt+wheel = depth   release Alt = cancel"
+    elseif kind == nil then
         hint = "G = menu   V = exit build"
     elseif kind == "block" then
-        local area = ga_exists(C.AREA_VAR) and ga_get_s(C.AREA_VAR) or ""
-        if ga_exists(C.ALT_VAR) and ga_get_b(C.ALT_VAR) then
+        if alt then
             if area == "" then
                 hint = "Area: L-click = corner at place spot   R-click = corner at block   (aim at nothing = cyan cursor)"
+                    .. "   MMB = schematic"
             else
-                hint = "Area " .. area .. "   L-click fill   R-click delete   Alt+wheel = depth   release Alt = cancel"
+                hint = "Area " .. area .. "   L-click fill   R-click delete   MMB = schematic   Alt+wheel = depth   release Alt = cancel"
             end
         else
             hint = "L-click place   R-click break   Alt+click area fill   MMB/C pick   Bksp undo   V exit"
         end
+    elseif kind == "schem" then
+        hint = "L-click = place it at the cyan ghost   Bksp undo   Alt+MMB twice = new schematic   V exit"
     elseif kind == "path" then
         hint = "L-click = use it like a " .. raw .. " ring   wheel = hotbar   V exit"
+    elseif kind == "action" then
+        local a = C.ACTIONS[raw]
+        hint = "L-click = " .. (a and a.use or raw) .. "   wheel = hotbar   V exit"
     else
         local d = ga_get_i(C.E_DIST) or 4
         hint = "L-click place   R-click remove   Alt+Wheel = distance (" .. d .. ")   MMB/C pick   V exit"
@@ -158,6 +169,8 @@ function p.__start(wid) end
 function p.__end(wid) end
 
 function p.__render(wid)
+    -- EDIT button on base's text box window (win_creative_text.lua); no-op once done
+    if C.patch_base_txt then pcall(C.patch_base_txt) end
     local ok, err = pcall(render_hotbar, wid)
     if not ok and not err_shown then
         err_shown = true   -- report once, don't spam every frame

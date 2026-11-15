@@ -508,6 +508,7 @@ function C.entry_info(kind, raw)
     local c = entry_cache[key]
     if c then
         if kind == "bent" then return c.label .. C.bent_suffix(raw), c.tex end
+        if kind == "schem" then return c.label .. C.schem_dims(raw), c.tex end
         return c.label, c.tex
     end
     local label, tex = raw, ""
@@ -526,10 +527,16 @@ function C.entry_info(kind, raw)
         label, tex = "Secret trophy: " .. C.nice_name((string.gsub(raw, "^st_", ""))), C.valid_tex("secret_trophy")
     elseif kind == "path" then
         label, tex = (raw == "blue") and "Blue Path" or "Pink Path", C.valid_tex("ring_" .. raw)
+    elseif kind == "action" then
+        local a = C.ACTIONS[raw]
+        if a then label, tex = a.label, C.valid_tex(a.icon) end
+    elseif kind == "schem" then
+        label, tex = raw, C.valid_tex("creative_schem")
     end
     tex = tex or ""
     entry_cache[key] = { label = label, tex = tex }
     if kind == "bent" then label = label .. C.bent_suffix(raw) end   -- changes, so not cached
+    if kind == "schem" then label = label .. C.schem_dims(raw) end  -- (same)
     return label, tex
 end
 

@@ -14,6 +14,74 @@
 
 local MSG_VAR   = "temp.creative.text_msg"
 local STATE_VAR = "temp.creative.text_state"
+local MODE_VAR  = "temp.creative.text_mode"      -- "place" | "edit" (set by the game)
+local EDIT_REQ  = "temp.creative.text_edit_req"  -- 1 = EDIT clicked in base's text window
+local BUILD_VAR = "temp.creative.build_mode"
+
+local function edit_mode()
+    return ga_exists(MODE_VAR) and ga_get_s(MODE_VAR) == "edit"
+end
+
+-------------------------------------------------------------------------------
+-- EDIT button on base's read-a-text-box window (win_base_txt) while build mode
+-- is on. We wrap that window's hooks (same Lua state; the engine looks them up
+-- by name every call). The button is an engine button widget, so it draws on
+-- top of the text box widget. Clicking it closes the window and asks the game
+-- (temp var, picked up by game_creative's tick) to open this editor on that
+-- text box. Patched from here at load, and again from the creative windows
+-- (in case base loads after us).
+-------------------------------------------------------------------------------
+local EDIT_BTN = 7731
+local edit_btn_shown = false
+
+local function build_on()
+    return ga_exists(BUILD_VAR) and ga_get_b(BUILD_VAR) == true
+end
+
+creative_ui = creative_ui or {}
+function creative_ui.patch_base_txt()
+    local m = _G.win_base_txt
+    if type(m) ~= "table" or m.__creative_edit_patched then return end
+    if type(m.__start) ~= "function" or type(m.__process_input) ~= "function" then return end
+    m.__creative_edit_patched = true
+    local o_start, o_input, o_end = m.__start, m.__process_input, m.__end
+    -- widgets belong to the window id, which is the same every time the window
+    -- opens, and nothing removes them: a button made once in build mode would
+    -- still be there next time. So remove it on close and whenever build mode
+    -- is off. (Removing a button that isn't there is a silent no-op: FBW.exe
+    -- WindowWidgets::WidgetButtonEnd returns if the window or handle is missing.)
+    local function remove_btn(wid)
+        pcall(ga_win_widget_button_end, wid, EDIT_BTN)
+        edit_btn_shown = false
+    end
+    m.__start = function(wid, ...)
+        local r = o_start(wid, ...)
+        remove_btn(wid)
+        if build_on() then
+            edit_btn_shown = pcall(ga_win_widget_button_start, wid, EDIT_BTN, 0.875, 0.935, 0.015, 0.03, "EDIT")
+        end
+        return r
+    end
+    m.__end = function(wid, ...)
+        remove_btn(wid)
+        if o_end then return o_end(wid, ...) end
+    end
+    m.__process_input = function(wid, ...)
+        if edit_btn_shown then
+            local ok, which = pcall(ga_win_widget_button_process_input, wid)
+            if ok and which == EDIT_BTN then
+                edit_btn_shown = false
+                ga_init_i(EDIT_REQ, 0)
+                ga_set_i(EDIT_REQ, 1)
+                ga_play_sound("menu_select")
+                ga_window_pop()
+                return
+            end
+        end
+        return o_input(wid, ...)
+    end
+end
+pcall(creative_ui.patch_base_txt)
 
 local BOX_X0, BOX_X1, BOX_Y0, BOX_Y1 = 0.06, 0.94, 0.60, 0.86   -- editor
 local PRE_X0, PRE_X1, PRE_Y0, PRE_Y1 = 0.06, 0.94, 0.10, 0.37   -- preview
@@ -43,7 +111,8 @@ local SW_Y0, SW_H, SW_W, SW_GAP = 0.485, 0.045, 0.060, 0.0133
 local BUTTONS = {
     { id = "paste",  label = "PASTE",               x = 0.06, y = 0.415, w = 0.13, h = 0.040 },
     { id = "clear",  label = "CLEAR",               x = 0.20, y = 0.415, w = 0.13, h = 0.040 },
-    { id = "place",  label = "PLACE TEXT BOX (CTRL+ENTER)", x = 0.20, y = 0.025, w = 0.34, h = 0.050 },
+    { id = "place",  label = "PLACE TEXT BOX (CTRL+ENTER)", edit_label = "SAVE TEXT BOX (CTRL+ENTER)",
+      x = 0.20, y = 0.025, w = 0.34, h = 0.050 },
     { id = "cancel", label = "CANCEL (ESC)",        x = 0.56, y = 0.025, w = 0.24, h = 0.050 },
 }
 
@@ -202,7 +271,8 @@ local function close(wid, state)
         s = (string.gsub(s, "%s+$", ""))        -- Ctrl+Enter's newline, trailing blanks
         set_text(wid, s)
         if s == "" then
-            ga_hud_msg("Type a message first (or ESC to cancel)", 1.5)
+            ga_hud_msg(edit_mode() and "Type a message (ESC = keep the old one)"
+                                    or "Type a message first (or ESC to cancel)", 1.5)
             return
         end
     end
@@ -252,9 +322,10 @@ function p.__render(wid)
     ga_win_set_background(wid, std.vec(0.0, 0.0, 0.0), 0.95)
     local c = ga_win_get_cursor_pos(wid)
 
+    local editing = edit_mode()
     ga_win_set_char_size(wid, 0.016, 0.032)
     ga_win_set_front_color(wid, std.vec(0.9, 0.85, 0.5))
-    ga_win_txt_center(wid, 0.935, "TEXT BOX")
+    ga_win_txt_center(wid, 0.935, editing and "EDIT TEXT BOX" or "TEXT BOX")
     ga_win_set_char_size(wid, 0.0085, 0.017)
     ga_win_set_front_color(wid, std.vec(0.75, 0.75, 0.75))
     ga_win_txt_center(wid, 0.895, "Type the message (Enter = new line). People read it with F.")
@@ -296,9 +367,10 @@ function p.__render(wid)
         ga_win_quad_color(wid, b.x, b.y, b.x + b.w, b.y + b.h,
             std.vec(math.min(1, base[1] * k), math.min(1, base[2] * k), math.min(1, base[3] * k)))
         local cw, ch = 0.0095, 0.019
+        local label = (editing and b.edit_label) or b.label
         ga_win_set_char_size(wid, cw, ch)
         ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
-        ga_win_txt(wid, b.x + (b.w - #b.label * cw) * 0.5, b.y + (b.h - ch) * 0.5, b.label)
+        ga_win_txt(wid, b.x + (b.w - #label * cw) * 0.5, b.y + (b.h - ch) * 0.5, label)
         ga_win_set_front_color_default(wid)
     end
 

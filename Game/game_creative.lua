@@ -36,9 +36,17 @@ function p.handler_place(str)
         ga_hud_msg("Creative: empty hotbar slot (press G to pick something)", 2.0)
         return false
     end
-    if kind == "path" then
-        local ok, err = pcall(C.use_path, name)
-        if not ok then ga_console_print("creative path error: " .. tostring(err)) end
+    if kind == "path" or kind == "action" then
+        local ok, err = pcall((kind == "path") and C.use_path or C.use_action, name)
+        if not ok then ga_console_print("creative " .. kind .. " error: " .. tostring(err)) end
+        return false
+    end
+    if kind == "schem" then
+        local ok, err = pcall(C.schem_place, name)
+        if not ok then
+            ga_hud_msg("Schematic FAIL: " .. tostring(err), 3.0)
+            ga_console_print("creative schematic error '" .. tostring(name) .. "': " .. tostring(err))
+        end
         return false
     end
     if kind ~= "block" then
@@ -67,7 +75,7 @@ function p.handler_break(str)
     C.ensure_vars()
     if not C.build_mode_or_heal() then return false end
     local kind = C.cur_entry()
-    if kind == "path" then return false end         -- path entries only use L-click
+    if kind == "path" or kind == "action" or kind == "schem" then return false end   -- these only use L-click
     if kind ~= nil and kind ~= "block" then
         local ok, tg = pcall(C.find_remove_target, kind)
         if not ok then
@@ -96,8 +104,17 @@ function p.handler_break(str)
 end
 
 -- Pick what you look at into the hotbar: a monster/ment, a basic ent, or a block.
+-- With Alt held: a schematic corner instead (game_creative_edit.lua area_click).
 function p.handler_eyedrop(str)
     C.ensure_vars()
+    if ga_get_b(C.ALT_VAR) and C.build_mode_or_heal() then
+        local ok, err = pcall(C.area_click, "schem", nil)
+        if not ok then
+            ga_hud_msg("Schematic FAIL: " .. tostring(err), 3.0)
+            ga_console_print("creative schematic select error: " .. tostring(err))
+        end
+        return false
+    end
     local eye  = ga_get_viewer_offset()
     local look = ga_get_sys_v("game.player.camera.look")
     local vlevel = ga_get_viewer_level()
@@ -174,8 +191,8 @@ local function wheel(delta)
     local step = (delta > 0) and 1 or -1
     if ga_get_b(C.ALT_VAR) then
         local kind = C.cur_entry()
-        if kind == nil or kind == "block" then
-            C.area_depth_step(step)                          -- area-fill 3D cursor
+        if S.area ~= nil or kind == nil or kind == "block" then
+            C.area_depth_step(step)                          -- area-fill / schematic 3D cursor
         else
             local d = C.place_dist() + step
             if d < C.DIST_MIN then d = C.DIST_MIN end
@@ -252,8 +269,11 @@ p.undo_held_dur = 0
 local tick_err_shown = false
 function p.__update_discrete_post()
     local ok, err = pcall(function()
+        C.hook_text_use()                       -- (no-op once done; text ents may load late)
+        C.text_edit_request()                   -- EDIT clicked in base's text box window
         C.finish_text_box()                     -- a message typed in win_creative_text
         if S.hb_restored then C.hb_mirror() end    -- hotbar -> dyn vars (saved with the game)
+        C.schem_tick()                          -- schematics: load, menu requests, named
     end)
     if not ok and not tick_err_shown then
         tick_err_shown = true
@@ -297,7 +317,16 @@ function p.handler_undo(str)
         local bp = std.chunk_id_and_lbph_to_bp(chunk_ids[i], e.lbph)
         ga_block_change_perm(level, bp, e.old)
     end
-    ga_hud_msg("Undo: restored " .. n .. " block(s)", 1.5)
+    local extra = ""
+    if batch.on_undo then                       -- a schematic: also take its ents away
+        local ok, removed = pcall(batch.on_undo)
+        if ok and type(removed) == "number" and removed > 0 then
+            extra = ", removed " .. removed .. " ent(s)"
+        elseif not ok then
+            ga_console_print("creative undo error: " .. tostring(removed))
+        end
+    end
+    ga_hud_msg("Undo: restored " .. n .. " block(s)" .. extra, 1.5)
 end
 
 function p.handler_wp_home(str)
@@ -395,13 +424,19 @@ local function register()
     game_command_system.add_help("creative_wp_home", "Teleport to your EMERGENCY waypoint.")
     game_command_system.add_command("creative_wp_warp", p.handler_wp_warp)
     game_command_system.add_help("creative_wp_warp", "Warp to the first waypoint matching temp.creative.wp_search.")
+    game_command_system.add_command(C.SCHEM_CMD, function(str) return C.schem_io(str) end)
+    game_command_system.add_help(C.SCHEM_CMD,
+        "Internal: one line of the creative schematics file (Output/FileOut/creative_schems.txt).")
 end
 
 function p.__load_game()
     C.ensure_vars()
     -- module locals survive a "soft" load of another save: start clean
     S.text_pending = nil
+    S.text_last_use = nil
     ga_set_s("temp.creative.text_state", "")
+    ga_set_i("temp.creative.text_edit_req", 0)
+    pcall(C.hook_text_use)
     local ok, err = pcall(C.hb_restore)
     S.hb_restored = ok
     if not ok then ga_console_print("creative hotbar restore error: " .. tostring(err)) end

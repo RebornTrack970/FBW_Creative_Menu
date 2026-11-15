@@ -2,3 +2,12 @@
 
 # Area-fill selection box (rendered almost transparent)
 creative_cyan                _ creative_cyan.png
+
+# Screenshot hotbar item (BUFFS tab -> CHEATS); the game has no camera icon
+creative_screenshot          _ creative_screenshot.png
+
+# Schematics (hotbar entries, DECOR -> SCHEMATICS)
+creative_schem               _ creative_schem.png
+
+# Schematic ghost: blocks without a known texture (tinted per block type)
+creative_white               _ creative_white.png

@@ -38,15 +38,26 @@ C.BR_SIZE   = "temp.creative.brush_size"
 C.E_COUNT, C.E_DIST, C.E_FREEZE, C.E_TTL =
     "temp.creative.ent_count", "temp.creative.ent_dist", "temp.creative.ent_freeze",
     "temp.creative.ent_ttl"
+C.E_HP = "temp.creative.ent_hp"   -- spawn HP, 0 = the type's own (Game/game_creative_place.lua)
 -- one placement distance for everything that isn't a block (mouse wheel changes it in-game)
+-- D_SIZE = picture size in % (100 = "M"); Game/game_creative_place.lua reads
+-- the same var and clamps to the same range
 C.D_SIZE, C.D_DIST, C.D_SNAP =
-    "temp.creative.decor_size", C.E_DIST, "temp.creative.decor_snap"
+    "temp.creative.decor_pct", C.E_DIST, "temp.creative.decor_snap"
+C.PIC_PCT_MIN, C.PIC_PCT_MAX = 10, 1000
 C.DIST_MAX = 60
 
 -- hotbar, shared with Game/game_creative.lua: hb1..hb9 = "kind|raw" or ""
 C.SLOT_VAR  = "temp.creative.hb_slot"
 C.HB_PREFIX = "temp.creative.hb"
 C.HB_COUNT  = 9
+-- one-click hotbar entries (BUFFS tab -> CHEATS, hotbar kind "action"):
+-- L-click in build mode runs them (Game/game_creative_place.lua use_action)
+C.ACTIONS = {
+    screenshot = { label = "Screenshot", icon = "creative_screenshot", use = "take a screenshot without the HUD" },
+    save       = { label = "Save",       icon = "icon_save",           use = "save the game" },
+    respawn    = { label = "Respawn",    icon = "respawn_active",      use = "respawn" },
+}
 C.ALT_VAR   = "temp.creative.alt"   -- Alt held (bound in build mode)
 C.AREA_VAR  = "temp.creative.area"  -- area-fill size text, set by game_creative
 
@@ -248,6 +259,11 @@ function C.pick_and_build(kind, raw, label)
         ga_hud_msg("Selected " .. label .. "  (L place / R break, wheel = hotbar)", 2.5)
     elseif kind == "path" then
         ga_hud_msg("Selected " .. label .. "  (L-click = use it like a " .. raw .. " ring)", 3.0)
+    elseif kind == "action" then
+        local a = C.ACTIONS[raw]
+        ga_hud_msg("Selected " .. label .. "  (L-click = " .. (a and a.use or raw) .. ")", 3.0)
+    elseif kind == "schem" then
+        ga_hud_msg("Selected schematic " .. label .. "  (L-click = place it at the cyan ghost, Backspace = undo)", 3.0)
     else
         ga_hud_msg("Selected " .. label .. "  (L place / R remove, Alt+wheel = distance)", 3.0)
     end

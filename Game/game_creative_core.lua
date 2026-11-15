@@ -29,6 +29,8 @@ C.TROPHY_BLOCK = "block_xar_trophy"
 --   block   = block type name          ment    = moving ent type (monsters etc.)
 --   bent    = basic ent type (shops..)  picture = picture_* texture (ment_picture_*)
 --   trophy  = trophy api name           secret  = secret trophy st_* name
+--   path    = pink | blue               action  = screenshot | save | respawn
+--   schem   = schematic name (game_creative_schem.lua)
 C.FAMILY = { ment = "ment", picture = "bent", bent = "bent", secret = "bent", trophy = "trophy" }
 
 function C.ensure_vars()
@@ -45,10 +47,19 @@ function C.ensure_vars()
     ga_init_i("temp.creative.ent_count", 1)
     ga_init_b("temp.creative.ent_freeze", false)
     ga_init_i("temp.creative.ent_ttl", 0)
-    ga_init_i("temp.creative.decor_size", 2)
+    ga_init_i("temp.creative.ent_hp", 0)     -- 0 = the monster type's own HP
+    ga_init_i("temp.creative.decor_pct", 100)
     ga_init_b("temp.creative.decor_snap", true)
     ga_init_s("temp.creative.text_msg", "")
     ga_init_s("temp.creative.text_state", "")
+    ga_init_s("temp.creative.text_mode", "place")
+    ga_init_i("temp.creative.text_edit_req", 0)
+    ga_init_s("temp.creative.schem_list", "")
+    ga_init_s("temp.creative.schem_status", "")
+    ga_init_s("temp.creative.schem_name", "")
+    ga_init_s("temp.creative.schem_state", "")
+    ga_init_s("temp.creative.schem_info", "")
+    ga_init_s("temp.creative.schem_req", "")
 end
 
 function C.enable_cheats()
@@ -110,6 +121,21 @@ function C.hb_pick(kind, raw)
         ga_set_s(HB_PREFIX .. target, want)
     end
     ga_set_i(C.SLOT_VAR, target)
+    C.sync_sel()
+end
+
+-- Put an entry into the SELECTED slot (a new schematic goes there)
+function C.hb_set_current(kind, raw)
+    ga_set_s(HB_PREFIX .. C.cur_slot(), kind .. "|" .. raw)
+    C.sync_sel()
+end
+
+-- Empty every slot holding this entry (a deleted schematic)
+function C.hb_remove_entry(kind, raw)
+    local want = kind .. "|" .. raw
+    for i = 1, C.HB_COUNT do
+        if ga_get_s(HB_PREFIX .. i) == want then ga_set_s(HB_PREFIX .. i, "") end
+    end
     C.sync_sel()
 end
 

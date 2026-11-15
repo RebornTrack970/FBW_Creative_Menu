@@ -79,11 +79,37 @@ function C.apply_brush(level, center, new_name)
     return apply_cells(level, brush_cells(center), new_name)
 end
 
+-- Like apply_cells with one block name per cell: list = { { bp, name }, ... }
+-- (schematics). on_undo (optional) runs after Backspace put the old blocks
+-- back and returns how many other things it removed (the ents a schematic
+-- placed); with it the step is undoable even when no block changed.
+-- Returns the number of blocks changed.
+function C.apply_block_list(level, list, on_undo)
+    local cache, batch = {}, {}
+    for _, e in ipairs(list) do
+        local ok_old, old = pcall(ga_block_get, level, e.bp)
+        if ok_old and old ~= e.name then
+            ga_block_change_perm(level, e.bp, e.name)
+            local path, lbph = get_undo_pos(level, e.bp, cache)
+            batch[#batch + 1] = { path = path, lbph = lbph, old = old }
+        end
+    end
+    batch.on_undo = on_undo
+    if #batch > 0 or on_undo ~= nil then
+        C.undo_stack[#C.undo_stack + 1] = batch
+        while #C.undo_stack > UNDO_MAX do table.remove(C.undo_stack, 1) end
+    end
+    return #batch
+end
+
 -------------------------------------------------------------------------------
 -- Area fill (block selected + Alt held). First click sets corner 1: L = the
 -- cell a normal L-click would place into, R = the block a normal R-click would
 -- break. Second click (still holding Alt) sets corner 2 the same way and then
 -- L fills the box with the selected block, R deletes it. Releasing Alt cancels.
+-- Middle mouse / C (mode "schem", any hotbar slot): corner 1 = the aimed
+-- block like R, the 2nd one saves the box as a schematic
+-- (game_creative_schem.lua).
 --
 -- Block positions are VIEWER-CENTRIC (std.lua: vcp = "viewer centric
 -- position"): the whole grid shifts by 16 every time you walk into another
@@ -126,6 +152,7 @@ local function cell_loaded(level, bp)
     local v = std.bp_to_parent_vcp(bp)
     return chunk_at(level, v.x, v.y, v.z) ~= nil
 end
+C.cell_loaded = cell_loaded   -- (schematics; reset the cache first: C.chunk_cache_reset)
 
 -- bp -> anchor that survives the grid shifting (nil if nothing is loaded)
 function C.anchor_make(level, bp)
@@ -255,6 +282,9 @@ function C.area_click(mode, block_name)
             return
         end
         S.area = { level = level, anchor = anchor, mode = mode }
+        if mode == "schem" then
+            ga_hud_msg("Schematic: corner 1 set - Alt+middle-click again for the other corner", 2.5)
+        end
         return
     end
     if vlevel ~= S.area.level then
@@ -274,6 +304,11 @@ function C.area_click(mode, block_name)
     if n > C.AREA_CAP then
         -- keep corner 1 so another corner 2 can be picked
         ga_hud_msg("Area too big: " .. n .. " blocks (max " .. C.AREA_CAP .. ")", 2.5)
+        return
+    end
+    if mode == "schem" then
+        C.area_cancel()
+        C.schem_begin_capture(level, x0, y0, z0, x1, y1, z1)
         return
     end
     -- never touch cells of chunks that aren't loaded (K/M-chunk land)

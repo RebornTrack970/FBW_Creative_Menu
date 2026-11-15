@@ -221,6 +221,9 @@ function C.rebuild(wid)
         end
         table.sort(S.items, isort.less)
 
+    elseif S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" then
+        C.dp.rebuild(search)                  -- win_creative_schem.lua
+
     elseif S.cur_tab == C.TAB_DECOR then
         rebuild_decor(search)
 
@@ -373,12 +376,20 @@ end
 local function set_of(t) local o = {} for _, v in ipairs(t) do o[v] = true end return o end
 
 -- (picture sizing / facing + trophy placement live in Game/game_creative.lua)
+-- presets for the PIC SIZE field (% of "M")
 local DECOR_SIZES = {
-    { label = "S",  scale = 0.6 },
-    { label = "M",  scale = 1.0 },
-    { label = "L",  scale = 1.8 },
-    { label = "XL", scale = 3.0 },
+    { label = "S",  pct = 60 },
+    { label = "M",  pct = 100 },
+    { label = "L",  pct = 180 },
+    { label = "XL", pct = 300 },
 }
+
+local function decor_pct()
+    local v = ga_get_i(C.D_SIZE)
+    if v < C.PIC_PCT_MIN then v = C.PIC_PCT_MIN end
+    if v > C.PIC_PCT_MAX then v = C.PIC_PCT_MAX end
+    return v
+end
 
 local function secret_trophy_names()
     local out = {}
@@ -491,11 +502,12 @@ local function decor_strip_layout(cb)
         cb(id, x, sy, w, sh, label, active, group)
         x = x + w + 0.005
     end
-    local cur = ga_get_i(C.D_SIZE)
+    local cur = decor_pct()
     for i, s in ipairs(DECOR_SIZES) do
-        btn("size" .. i, 0.032, s.label, cur == i, i == 1 and "PIC SIZE" or nil)
+        btn("size" .. i, 0.032, s.label, cur == s.pct, i == 1 and "PIC SIZE" or nil)
     end
-    x = x + 0.020
+    cb("s_val", x, sy, 0.062, sh, nil, false, nil)   -- typed size in %
+    x = x + 0.062 + 0.020
     btn("d_minus", 0.030, "-", false, "DIST")
     cb("d_val", x, sy, 0.030, sh, tostring(decor_dist()), false, nil)
     x = x + 0.035
@@ -504,6 +516,8 @@ local function decor_strip_layout(cb)
     btn("snap",    0.070, "SNAP", ga_get_b(C.D_SNAP), "FACING")
     x = x + 0.020
     btn("remove",  0.190, "REMOVE PICS HERE", false, nil)
+    local o = C.dp.open                     -- bottom right: the SCHEMATICS page
+    cb("schems", o.x, o.y, o.w, o.h, "SCHEMATICS >", false, nil)
 end
 
 -- INTERACT settings strip: the hotbar's current entry when it takes an amount
@@ -550,8 +564,9 @@ local function amount_strip_layout(raw, cb)
     return x
 end
 
--- - / + step: Ctrl 10, Shift 1K, Ctrl+Shift 10K, nothing held = the type's
--- own step (100 XP / gold, 10 sec / ammo).
+-- - / + step: nothing held = the type's own step (100 XP / gold, 10 sec /
+-- ammo), Ctrl = the other one of 10 / 100 (so both are reachable), Shift 1K,
+-- Ctrl+Shift 10K.
 -- NO Alt: ga_win_key_down only knows the window key table (FBW.exe
 -- StringToDKEY: ESC SPACE arrows LCTRL RCTRL TAB GRAVE BACKSLASH BACKSPACE
 -- ENTER CAPSLOCK LSHIFT RSHIFT MINUS EQUALS brackets COMMA PERIOD SLASH
@@ -563,7 +578,7 @@ local function amount_step(a)
     local shift = key_held("LSHIFT", "RSHIFT")
     if ctrl and shift then return 10000 end
     if shift then return 1000 end
-    if ctrl then return 10 end
+    if ctrl then return (a.step == 10) and 100 or 10 end
     return a.step
 end
 
@@ -592,8 +607,11 @@ local function param_strip_click(raw, cursor)
     ga_play_sound("menu_move")
 end
 
-local function decor_strip_click(id)
-    if string.sub(id, 1, 4) == "size" then ga_set_i(C.D_SIZE, tonumber(string.sub(id, 5)) or 2)
+local function decor_strip_click(id, wid)
+    if id == "schems" then C.dp.set(wid, "schems") return false end   -- (plays its own sound)
+    if string.sub(id, 1, 4) == "size" then
+        local s = DECOR_SIZES[tonumber(string.sub(id, 5)) or 2]
+        ga_set_i(C.D_SIZE, s and s.pct or 100)
     elseif id == "d_minus" then ga_set_i(C.D_DIST, math.max(1, decor_dist() - 1))
     elseif id == "d_plus" then ga_set_i(C.D_DIST, math.min(60, decor_dist() + 1))
     elseif id == "snap" then ga_toggle_b(C.D_SNAP)
@@ -631,10 +649,22 @@ function C.grid_input(wid)
                     choose_interactable(gi, wid)
                 elseif S.cur_tab == C.TAB_TELEPORT then
                     choose_teleport(gi)
+                elseif S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" then
+                    C.dp.choose(gi)
                 elseif S.cur_tab == C.TAB_DECOR then
                     choose_decor(gi)
                 end
             end
+        end
+
+        -- schematics page: R-click twice = delete, middle-click = save as Lua
+        if S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" and ga_win_mouse_pressed(wid, false) then
+            local gi = C.hovered_index(ga_win_get_cursor_pos(wid))
+            if gi >= 1 then C.dp.rclick(gi) end
+        end
+        if S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" and C.mmb_pressed(wid) then
+            local gi = C.hovered_index(ga_win_get_cursor_pos(wid))
+            if gi >= 1 then C.dp.export(gi) end
         end
 
         if S.cur_tab == C.TAB_BLOCKS then
@@ -758,12 +788,15 @@ function C.strip_input(wid)
             if raw ~= nil and C.AMOUNT_BENTS[raw] then amount_strip_click(raw, cursor) end
             if raw ~= nil and C.PARAM_BENTS[raw] then param_strip_click(raw, cursor) end
 
+        elseif S.cur_tab == C.TAB_DECOR and C.dp.sub ~= nil then
+            C.dp.strip_click(wid, cursor)
+
         elseif S.cur_tab == C.TAB_DECOR then
             local clicked = nil
             decor_strip_layout(function(id, x, y, w, h)
-                if clicked == nil and id ~= "d_val" and C.btn_rect(cursor, x, y, w, h) then clicked = id end
+                if clicked == nil and id ~= "d_val" and id ~= "s_val" and C.btn_rect(cursor, x, y, w, h) then clicked = id end
             end)
-            if clicked and decor_strip_click(clicked) then
+            if clicked and decor_strip_click(clicked, wid) then
                 ga_play_sound("menu_select")
             end
 
@@ -844,11 +877,6 @@ function C.render_control_strip_blocks(wid)
     ga_win_set_front_color_default(wid)
     bsx = bsx + bsw + 0.035
     C.small_btn(wid, cursor, bsx, sy, bsw, sh, "+", false)
-
-    ga_win_set_char_size(wid, 0.007, 0.014)
-    ga_win_set_front_color(wid, std.vec(0.4, 0.4, 0.4))
-    ga_win_txt(wid, 0.88, sy + 0.010, "R-click = fav")
-    ga_win_set_front_color_default(wid)
 end
 
 function C.render_control_strip_entities(wid)
@@ -910,6 +938,20 @@ function C.render_control_strip_entities(wid)
     ga_win_set_front_color_default(wid)
     ex = ex + ew + 0.035
     C.small_btn(wid, cursor, ex, sy, ew, sh, "+", false)
+    ex = ex + ew + 0.030
+
+    -- HP: click and type; empty / 0 (shown as DEFAULT) = the monster's own HP
+    local hw = 0.120
+    local hp = ga_exists(C.E_HP) and ga_get_i(C.E_HP) or 0
+    ga_win_set_char_size(wid, 0.007, 0.014)
+    ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
+    ga_win_txt(wid, ex, sy + sh + 0.008, "HP")
+    ga_win_set_front_color_default(wid)
+    ga_win_quad_color(wid, ex, sy, ex + hw, sy + sh, std.vec(0.03, 0.03, 0.06))
+    C.num_field(wid, "ent_hp", ex + 0.006, sy + sh * 0.5 - 0.008, 0.010, 0.020,
+        (hp > 0) and hp or "", function(n) ga_set_i(C.E_HP, math.max(0, n)) end,
+        { placeholder = "DEFAULT", empty = 0, min_w = hw - 0.012, max_w = hw - 0.012,
+          col = std.vec(1.0, 0.9, 0.3) })
 end
 
 -- INTERACT settings strip for the selected hotbar ent: its amount (XP /
@@ -921,14 +963,7 @@ function C.render_control_strip_interact(wid)
     ga_win_quad_color(wid, 0.02, sy - 0.003, 0.98, sy + sh + 0.003, std.vec(0.06, 0.06, 0.10))
 
     local raw = strip_target()
-    if raw == nil then
-        ga_win_set_char_size(wid, 0.008, 0.016)
-        ga_win_set_front_color(wid, std.vec(0.45, 0.45, 0.55))
-        ga_win_txt(wid, 0.03, sy + sh * 0.5 - 0.007,
-            "SETTINGS: pick XP, a powerup, a key, huge ammo, a toll, a green key / door or a door unlock")
-        ga_win_set_front_color_default(wid)
-        return
-    end
+    if raw == nil then return end    -- (which ents have settings: see the ? help)
 
     local function label(x, y, txt, col)
         ga_win_set_char_size(wid, 0.007, 0.014)
@@ -941,9 +976,7 @@ function C.render_control_strip_interact(wid)
     local a = C.AMOUNT_BENTS[raw]
     if a ~= nil then
         local v = C.amount_get(raw)
-        label(0.025, y_lab, "AMOUNT (" .. a.unit .. (a.neg and ", - = negative" or "") .. ")   - / + "
-            .. C.fmt_int(amount_step(a)))
-        label(0.025, y_leg, "- / + step: Ctrl 10 | Shift 1K | Ctrl+Shift 10K", std.vec(0.45, 0.45, 0.55))
+        label(0.025, y_lab, "AMOUNT (" .. a.unit .. ")   - / + " .. C.fmt_int(amount_step(a)))
         amount_strip_layout(raw, function(id, x, y, w, h, lbl, n)
             if id == "value" then
                 ga_win_quad_color(wid, x, y, x + w, y + h, std.vec(0.03, 0.03, 0.06))
@@ -989,14 +1022,7 @@ function C.render_control_strip_interact(wid)
     ga_win_set_front_color_default(wid)
 end
 
-function C.render_pick_hint(wid, line)
-    ga_win_set_char_size(wid, 0.0075, 0.015)
-    ga_win_set_front_color(wid, std.vec(0.55, 0.55, 0.62))
-    ga_win_txt_center(wid, 0.212, line)
-    ga_win_set_front_color_default(wid)
-end
-
--- INTERACT -> Trophies page: BACK button + notes
+-- INTERACT -> Trophies page: BACK button + title (notes are in the ? help)
 function C.render_trophy_strip(wid)
     local cursor = ga_win_get_cursor_pos(wid)
     local b = C.tp.back
@@ -1004,12 +1030,7 @@ function C.render_trophy_strip(wid)
     C.small_btn(wid, cursor, b.x, b.y, b.w, b.h, "< BACK TO INTERACT", false)
     ga_win_set_char_size(wid, 0.010, 0.020)
     ga_win_set_front_color(wid, std.vec(0.9, 0.85, 0.5))
-    ga_win_txt(wid, b.x + b.w + 0.03, b.y + 0.008, "TROPHIES - click one to put it in the hotbar")
-    ga_win_set_front_color_default(wid)
-    C.render_pick_hint(wid, "In world: L-click places it in the white cell, R-click removes the red one, Alt+wheel = distance, Ctrl = id.")
-    ga_win_set_char_size(wid, 0.0075, 0.015)
-    ga_win_set_front_color(wid, std.vec(0.85, 0.65, 0.35))
-    ga_win_txt_center(wid, 0.188, "Trophies are real: touching one collects it (gold/health bonus + its Steam achievement).")
+    ga_win_txt(wid, b.x + b.w + 0.03, b.y + 0.008, "TROPHIES")
     ga_win_set_front_color_default(wid)
 end
 
@@ -1028,12 +1049,23 @@ function C.render_control_strip_decor(wid)
             ga_win_set_front_color(wid, std.vec(1, 1, 1))
             ga_win_txt(wid, x + w * 0.5 - 0.005 * #label, y + h * 0.5 - 0.008, label)
             ga_win_set_front_color_default(wid)
+        elseif id == "s_val" then
+            -- click and type a size in % (S/M/L/XL = 60/100/180/300)
+            ga_win_quad_color(wid, x, y, x + w, y + h, std.vec(0.03, 0.03, 0.06))
+            C.num_field(wid, "decor_pct", x + 0.006, y + h * 0.5 - 0.008, 0.010, 0.020, decor_pct(),
+                function(n)
+                    ga_set_i(C.D_SIZE, math.max(C.PIC_PCT_MIN, math.min(C.PIC_PCT_MAX, n)))
+                end,
+                { max_w = w - 0.024, min_w = w - 0.024, col = std.vec(1.0, 0.9, 0.3) })
+            ga_win_set_char_size(wid, 0.009, 0.018)
+            ga_win_set_front_color(wid, std.vec(0.6, 0.6, 0.6))
+            ga_win_txt(wid, x + w - 0.014, y + h * 0.5 - 0.008, "%")
+            ga_win_set_front_color_default(wid)
         else
             C.small_btn(wid, cursor, x, y, w, h, label, active)
         end
     end)
 
-    C.render_pick_hint(wid, "Click = put in hotbar. In world: L-click place, R-click remove, Alt+wheel = distance. Aim at a wall to hang pictures.")
     ga_win_set_front_color_default(wid)
 end
 
@@ -1051,12 +1083,6 @@ function C.render_teleport_tab(wid)
     C.small_btn(wid, cursor, tx, sy, tw, sh, "HOME (F7)", false)
     tx = tx + tw + 0.01
     C.small_btn(wid, cursor, tx, sy, tw + 0.02, sh, "PLACE WP HERE", false)
-
-    tx = tx + tw + 0.04
-    ga_win_set_char_size(wid, 0.008, 0.016)
-    ga_win_set_front_color(wid, std.vec(0.5, 0.5, 0.5))
-    ga_win_txt(wid, tx, sy + 0.010, "Click a waypoint to warp | F6 = warp by search")
-    ga_win_set_front_color_default(wid)
 end
 
 function C.render_grid_tab(wid, mode)
@@ -1080,6 +1106,8 @@ function C.render_grid_tab(wid, mode)
             msg = "No recent blocks yet - pick one to start building"
         elseif mode == "teleport" then
             msg = "No waypoints found"
+        elseif mode == "schem" then
+            msg = "No schematics yet"
         end
         ga_win_set_char_size(wid, C.fix_charw(0.010), 0.020)
         ga_win_set_front_color(wid, std.vec(0.45, 0.45, 0.55))
@@ -1107,6 +1135,7 @@ function C.render_grid_tab(wid, mode)
             elseif mode == "entity"   then tex = C.ent_tex(it.raw)
             elseif mode == "interact" then tex = C.valid_tex(it.tex)
             elseif mode == "decor"    then tex = C.valid_tex(it.tex)
+            elseif mode == "schem"    then tex = C.valid_tex(it.tex)
             end
             if tex ~= "" then
                 ga_win_quad(wid, minx, miny, maxx, maxy, tex)
@@ -1119,8 +1148,10 @@ function C.render_grid_tab(wid, mode)
                 ga_win_quad_color(wid, minx, miny, maxx, maxy, c)
             end
 
-            if is_hov or is_sel then
+            local armed = (mode == "schem") and C.dp.del_armed(it.raw)   -- 1st R-click of a delete
+            if is_hov or is_sel or armed then
                 local fcol = is_sel and std.vec(1.0, 0.9, 0.2) or std.vec(1.0, 1.0, 1.0)
+                if armed then fcol = std.vec(1.0, 0.25, 0.2) end
                 local t = 0.004
                 ga_win_quad_color(wid, minx, maxy - t, maxx, maxy, fcol)
                 ga_win_quad_color(wid, minx, miny, maxx, miny + t, fcol)
@@ -1139,6 +1170,15 @@ function C.render_grid_tab(wid, mode)
                 ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
                 ga_win_txt(wid, minx + 0.004, miny + (maxy - miny) * 0.5 - 0.005, C.fit(it.label, max_chars))
                 ga_win_set_front_color_default(wid)
+            elseif mode == "schem" then
+                -- name on a dark band at the bottom of the tile
+                local cw = 0.0055
+                local max_chars = math.max(1, math.floor((maxx - minx - 0.004) / cw))
+                ga_win_quad_color(wid, minx, miny, maxx, miny + 0.017, std.vec(0.02, 0.04, 0.08))
+                ga_win_set_char_size(wid, cw, 0.011)
+                ga_win_set_front_color(wid, std.vec(1.0, 1.0, 1.0))
+                ga_win_txt(wid, minx + 0.002, miny + 0.003, C.fit(it.label, max_chars))
+                ga_win_set_front_color_default(wid)
             end
         end
     end
@@ -1152,6 +1192,10 @@ function C.render_grid_tab(wid, mode)
         local shown = raw_name and it.raw or it.label
         if mode == "interact" and it.kind == nil and not raw_name then
             shown = shown .. C.bent_suffix(it.raw)          -- "Experience (1,000 XP)"
+        end
+        if mode == "schem" then
+            shown = shown .. "  (" .. it.info .. ")"         -- "house  (7x5x6, 120 blocks, 2 ents)"
+            if C.dp.del_armed(it.raw) then shown = "R-click again = DELETE " .. it.label end
         end
         local cw_t = 0.0092
         ga_win_set_char_size(wid, cw_t, 0.020)

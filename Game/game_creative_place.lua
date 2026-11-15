@@ -23,7 +23,15 @@ local PIC_TALL = set_of{
     "picture_base_camp", "picture_portal_back_to_i2", "picture_corn_maze", "picture_cot_ophelia",
     "picture_cot_spring_high", "picture_cot_spring", "picture_m_to_omega",
 }
-local DECOR_SCALE = { 0.6, 1.0, 1.8, 3.0 }   -- S M L XL (DECOR tab "PIC SIZE")
+-- DECOR tab "PIC SIZE": % of "M" (presets S 60 / M 100 / L 180 / XL 300, or
+-- typed); same var + range as the window (win_creative_core.lua)
+local PIC_PCT_VAR, PIC_PCT_MIN, PIC_PCT_MAX = "temp.creative.decor_pct", 10, 1000
+local function pic_scale()
+    local v = ga_get_i(PIC_PCT_VAR)
+    if v < PIC_PCT_MIN then v = PIC_PCT_MIN end
+    if v > PIC_PCT_MAX then v = PIC_PCT_MAX end
+    return v / 100
+end
 
 local function nice(s)
     s = string.gsub(s, "_", " ")
@@ -43,11 +51,25 @@ local function freeze_ment(id)
     end
 end
 
+-- ENTITIES "HP" (temp.creative.ent_hp, 0 = the type's own): xar monsters keep
+-- health in "health", or with the difficulty curve on in "health_curved" /
+-- "health_max_curved" (game_ment_health: it only computes the curved pair
+-- while health_max_curved is -1, so setting it keeps our number exact).
+-- Only vars the type has are set (all ints in xar's monster type init).
+local HP_VARS = { "health", "health_curved", "health_max_curved" }
+
+local function init_set_hp(raw, hp)
+    for _, v in ipairs(HP_VARS) do
+        if ga_ment_type_var_exists(raw, v) then ga_ment_init_set_i(v, hp) end
+    end
+end
+
 local function spawn_ments(raw)
     local level, pos, look = C.aim_point(0.5)
     local count = ga_get_i("temp.creative.ent_count")
     local ttl   = ga_get_i("temp.creative.ent_ttl")
     local freeze = ga_get_b("temp.creative.ent_freeze")
+    local hp    = ga_exists("temp.creative.ent_hp") and ga_get_i("temp.creative.ent_hp") or 0
     if count < 1 then count = 1 end
     if count > 20 then count = 20 end
     -- spread several side by side, perpendicular to the look dir (world up = +Z)
@@ -64,12 +86,41 @@ local function spawn_ments(raw)
             ga_ment_init_set_b("__turning_disabled", true)
         end
         if ttl > 0 then ga_ment_init_set_f("__ttl", ttl * 1.0) end
+        if hp > 0 then
+            local ok, err = pcall(init_set_hp, raw, hp)
+            if not ok then ga_console_print("creative hp error: " .. tostring(err)) end
+        end
         local id = ga_ment_end()
         if freeze and type(id) == "number" and id >= 0 then
             local ok, err = pcall(freeze_ment, id)
             if not ok then ga_console_print("creative freeze error: " .. tostring(err)) end
         end
     end
+end
+
+-- One ment at pos with an exact HP (0 = the type's own), frozen or not, and
+-- its own texture (__tex_override, "" = the type's), like the ENTITIES
+-- settings do it (schematics). Returns its inst id.
+function C.spawn_ment_at(level, pos, raw, hp, frozen, tex)
+    ga_ment_start(level, pos, raw)
+    -- (a frozen monster's "ice" comes from freezing it again below)
+    if type(tex) == "string" and tex ~= "" and not (frozen and tex == "ice") then
+        ga_ment_init_set_s("__tex_override", tex)
+    end
+    if frozen then
+        ga_ment_init_set_b("__vel_disabled", true)
+        ga_ment_init_set_b("__turning_disabled", true)
+    end
+    if type(hp) == "number" and hp > 0 then
+        local ok, err = pcall(init_set_hp, raw, hp)
+        if not ok then ga_console_print("creative hp error: " .. tostring(err)) end
+    end
+    local id = ga_ment_end()
+    if frozen and type(id) == "number" and id >= 0 then
+        local ok, err = pcall(freeze_ment, id)
+        if not ok then ga_console_print("creative freeze error: " .. tostring(err)) end
+    end
+    return id
 end
 
 -------------------------------------------------------------------------------
@@ -144,7 +195,7 @@ function C.picture_placement(raw)
     end
     local wh = PIC_SQUARE
     if PIC_WIDE[raw] then wh = PIC_WIDE_WH elseif PIC_TALL[raw] then wh = PIC_TALL_WH end
-    local scale = DECOR_SCALE[ga_get_i("temp.creative.decor_size")] or 1.0
+    local scale = pic_scale()
     local bp = std.lp_to_bp(pos)
     return {
         level = level, bp = bp, tex = raw, w = wh[1] * scale, h = wh[2] * scale, fx = fx, fy = fy,
@@ -177,7 +228,10 @@ end
 local TXT_BENTS = { bent_base_txt = "Text box", bent_base_UNKNOWN = "Base UNKNOWN" }
 local TXT_MSG   = "temp.creative.text_msg"     -- also pre-fills the next text box
 local TXT_STATE = "temp.creative.text_state"   -- "" | "edit" | "commit" | "cancel"
-S.text_pending = nil                       -- { level, anchor, bent }
+local TXT_MODE  = "temp.creative.text_mode"    -- "place" | "edit": what the editor's button says
+local TXT_EDIT_REQ = "temp.creative.text_edit_req"  -- 1 = EDIT clicked in base's read window
+S.text_pending = nil                       -- { level, anchor, bent, edit, draft }
+S.text_last_use = nil                      -- { level, anchor, bent }: last text box read (F)
 
 local function begin_text_box(level, bp, bent)
     local ok, there = pcall(ga_bent_get_type, level, bp)
@@ -192,8 +246,16 @@ local function begin_text_box(level, bp, bent)
         return
     end
     S.text_pending = { level = level, anchor = anchor, bent = bent }
+    ga_set_s(TXT_MODE, "place")
     ga_set_s(TXT_STATE, "edit")
     ga_window_push("win_creative_text")
+end
+
+local function text_bent_at(level, bp)
+    if level == nil or bp == nil then return nil end
+    local ok, t = pcall(ga_bent_get_type, level, bp)
+    if ok and TXT_BENTS[t] then return t end
+    return nil
 end
 
 function C.finish_text_box()
@@ -202,10 +264,14 @@ function C.finish_text_box()
     ga_set_s(TXT_STATE, "")
     local pend = S.text_pending
     S.text_pending = nil
-    if state == "cancel" or pend == nil then return end
+    if pend == nil then return end
     local msg = ga_get_s(TXT_MSG)
+    -- editing loaded the box's text into TXT_MSG: give the draft back
+    if pend.edit and pend.draft ~= nil then ga_set_s(TXT_MSG, pend.draft) end
+    if state == "cancel" then return end
     if msg == "" then
-        ga_hud_msg("Text: empty message, nothing placed", 1.5)
+        ga_hud_msg(pend.edit and "Text: empty message, text box unchanged"
+                              or "Text: empty message, nothing placed", 1.5)
         return
     end
     C.chunk_cache_reset()
@@ -214,9 +280,80 @@ function C.finish_text_box()
         ga_hud_msg("Text: that spot is no longer loaded", 2.0)
         return
     end
+    if pend.edit then
+        local t = text_bent_at(pend.level, bp)
+        if t == nil then
+            ga_hud_msg("Text: that text box is gone", 2.0)
+            return
+        end
+        ga_bent_set_param_s(pend.level, bp, msg, C.BIG_TTL)
+        ga_hud_msg(TXT_BENTS[t] .. " updated", 1.5)
+        return
+    end
     local bent = TXT_BENTS[pend.bent] and pend.bent or "bent_base_txt"
     ga_bent_add_s(pend.level, bp, bent, msg, C.BIG_TTL)
     ga_hud_msg(TXT_BENTS[bent] .. " placed (F on it to read)", 1.5)
+end
+
+-------------------------------------------------------------------------------
+-- Editing a placed text box: in build mode base's read window (win_base_txt)
+-- gets an EDIT button (Windows/win_creative_text.lua wraps that window). It
+-- closes the window and sets TXT_EDIT_REQ; the next tick finds the box - the
+-- one last read (recorded by wrapping the text ents' __on_use), else the one
+-- on the crosshair - loads its text into the editor (win_creative_text, edit
+-- mode) and finish_text_box() then writes the new text into the same ent.
+-------------------------------------------------------------------------------
+
+-- wrap __on_use of base's text ents to remember which one was read (they run
+-- in this Lua state; engine looks the hook up by name on each use)
+function C.hook_text_use()
+    for name, _ in pairs(TXT_BENTS) do
+        local m = _G[name]
+        if type(m) == "table" and type(m.__on_use) == "function" and not m.__creative_use_hooked then
+            local orig = m.__on_use
+            m.__creative_use_hooked = true
+            m.__on_use = function(level, bp)
+                pcall(function()
+                    C.chunk_cache_reset()
+                    local a = C.anchor_make(level, bp)
+                    S.text_last_use = a and { level = level, anchor = a, bent = name } or nil
+                end)
+                return orig(level, bp)
+            end
+        end
+    end
+end
+
+function C.text_edit_request()
+    if not ga_exists(TXT_EDIT_REQ) or ga_get_i(TXT_EDIT_REQ) ~= 1 then return end
+    ga_set_i(TXT_EDIT_REQ, 0)
+    if S.text_pending ~= nil then return end           -- the editor is already busy
+    C.chunk_cache_reset()
+    local level, bp, bent = nil, nil, nil
+    local u = S.text_last_use
+    if u ~= nil then
+        local b = C.anchor_bp(u.anchor)
+        if text_bent_at(u.level, b) then level, bp = u.level, b end
+    end
+    if bp == nil then                                   -- not recorded: the one aimed at
+        local tg = C.crosshair_target()
+        if tg ~= nil and tg.what == "bent" and text_bent_at(tg.level, tg.bp) then
+            level, bp = tg.level, tg.bp
+        end
+    end
+    bent = text_bent_at(level, bp)
+    local anchor = bent and C.anchor_make(level, bp)
+    if not anchor then
+        ga_hud_msg("Edit: can't find that text box - aim at it, F, then EDIT again", 2.0)
+        return
+    end
+    local ok, cur = pcall(ga_bent_get_param_s, level, bp)
+    S.text_pending = { level = level, anchor = anchor, bent = bent, edit = true,
+                       draft = ga_get_s(TXT_MSG) }
+    ga_set_s(TXT_MSG, (ok and type(cur) == "string") and cur or "")
+    ga_set_s(TXT_MODE, "edit")
+    ga_set_s(TXT_STATE, "edit")
+    ga_window_push("win_creative_text")
 end
 
 -------------------------------------------------------------------------------
@@ -293,6 +430,15 @@ function C.bent_param_s(raw)
     return p.def
 end
 
+-- false when s is a text param xar would choke on for bent type raw (a name
+-- outside its fixed list); any other ent / param is fine (schematics check
+-- what they read from the file with this)
+function C.bent_param_valid(raw, s)
+    local p = PARAM_S[raw]
+    if p == nil or p.choices == nil then return true end
+    return param_ok(p, s)
+end
+
 -- eyedropper: remember a picked ent's text param (only valid values)
 function C.bent_param_remember(raw, s)
     local p = PARAM_S[raw]
@@ -345,7 +491,11 @@ end
 
 local REACH        = 40    -- how far right click looks when no block is aimed at
 local TROPHY_REACH = 24    -- cells walked along the ray looking for trophy blocks
-local MENT_MARGIN  = 20    -- extra sphere-query radius (XL wide pictures are ~18)
+local MENT_MARGIN  = 20    -- extra sphere-query radius for xar picture ments (~18 at most)
+-- same for our picture bents: a bent sits at its picture's centre, so look
+-- as far as half the diagonal of the biggest one (wide picture at max size)
+local PIC_MARGIN   = math.ceil(0.5 * math.sqrt(PIC_WIDE_WH[1] ^ 2 + PIC_WIDE_WH[2] ^ 2)
+                               * PIC_PCT_MAX / 100) + 2
 
 local function is_picture(t)
     return type(t) == "string" and string.sub(t, 1, 13) == "ment_picture_"
@@ -470,7 +620,7 @@ function C.crosshair_target()
             consider(bent_target(vlevel, eye, look, bp))
         end
     end
-    local okb, bents = pcall(ga_bent_sphere_query, vlevel, mid, half + MENT_MARGIN)
+    local okb, bents = pcall(ga_bent_sphere_query, vlevel, mid, half + PIC_MARGIN)
     if okb and type(bents) == "table" then
         for _, v in pairs(bents) do
             if v.bp ~= nil then consider(bent_target(vlevel, eye, look, v.bp)) end
@@ -597,5 +747,30 @@ function C.use_path(raw)
         end
         tb.start_tele(cid)
         ga_play_sound("blue_ring")
+    end
+end
+
+-------------------------------------------------------------------------------
+-- "Screenshot" / "Save" / "Respawn" hotbar entries (BUFFS tab, kind "action"):
+-- L-click runs them.
+-------------------------------------------------------------------------------
+
+function C.use_action(raw)
+    if raw == "screenshot" then
+        -- engine command; xar's top.__game_input shows "Screenshot saved"
+        ga_command("screenshot no_hud")
+    elseif raw == "save" then
+        -- what base's save ent does (bent_base_save: ga_save(play_sound))
+        if ga_save ~= nil then ga_save(true) else ga_command("save") end
+    elseif raw == "respawn" then
+        -- xar's respawn in hardcore mode just leaves you dead for good
+        if ga_get_hardcore_mode ~= nil and ga_get_hardcore_mode() then
+            ga_hud_msg("Respawn: not in hardcore mode (you would stay dead)", 3.0)
+            ga_play_sound("error")
+            return
+        end
+        -- = pressing Enter on the death screen (xar win_death): respawn point,
+        -- xar's respawn rules (top.__respawn_player)
+        ga_command("respawn force")
     end
 end
