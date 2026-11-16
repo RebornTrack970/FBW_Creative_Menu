@@ -934,7 +934,7 @@ end
 -- game_merge_engine merges pairs, which gets slow). Boxes -> create_rect,
 -- single blocks -> set_pos. A block holds 16x16x16 cells, so a bigger
 -- schematic is cut into pieces (one script each, to place side by side).
--- Middle-click a schematic in DECOR -> SCHEMATICS. Files go to
+-- Middle-click a schematic in the SCHEMS tab. Files go to
 -- Output/FileOut/block_schem_<name>[_x_y_z].lua (the engine only writes there,
 -- names only a-z A-Z 0-9 _ and one dot).
 -------------------------------------------------------------------------------

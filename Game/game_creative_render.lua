@@ -190,12 +190,218 @@ local function render_nonblock_preview(kind, raw)
     end
 end
 
+-------------------------------------------------------------------------------
+-- Ent models: how to draw a basic ent / moving ent TYPE without an instance
+-- (schematic ghost here, the SCHEMS tab's 3D preview in the menu).
+--
+-- Only meshes the game surely has: an unknown mesh name makes the engine quit
+-- (FBW.exe PackageMeshSystem::GetTexName -> PoliteExit; pcall can't catch it)
+-- and there is no "does this mesh exist" function. So:
+--   * moving ents: their __mesh (every xar / base type sets it at type init;
+--     the engine draws exactly that one for live ents),
+--   * basic ents: __get_mesh() / __get_mesh2(), else the mesh named like the
+--     type (what the engine does), minus the xar bents that have no such mesh
+--     (same list as the INTERACT icons, Windows/win_creative_tex.lua),
+--   * types that draw themselves (__on_render) are skipped (they may read the
+--     world at their spot), except our own pictures, drawn from their param.
+-- Model = { meshes = { { mesh, tex }, ... }, scale, pulse } or false.
+-------------------------------------------------------------------------------
+local NO_MESH_BENTS = { bent_ammo_gun_3_huge = true, bent_genesis_marker_long = true,
+                        bent_genesis_marker_short = true }
+local PIC_BENT, PIC_MESH, PIC_THICKNESS = "bent_creative_picture", "creative_picture", 0.06
+
+local model_cache = { bent = {}, ment = {} }
+
+-- a texture name the game really has, else nil
+local function real_tex(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    local ui = rawget(_G, "creative_ui")
+    if type(ui) ~= "table" or type(ui.ntex) ~= "function" then return nil end
+    local ok, t = pcall(ui.ntex, name)
+    if ok and t == name then return t end
+    return nil
+end
+
+local function mesh_entry(mesh)
+    if type(mesh) ~= "string" or mesh == "" then return nil end
+    local ok, tex = pcall(ga_mesh_get_tex, mesh)
+    if not ok or type(tex) ~= "string" then return nil end
+    return { mesh = mesh, tex = tex }
+end
+
+local function bent_model(t)
+    local mod = rawget(_G, t)
+    if type(mod) ~= "table" or mod.__on_render ~= nil then return false end
+    local meshes = {}
+    local m1 = nil
+    if mod.__get_mesh ~= nil then
+        local ok, r = pcall(mod.__get_mesh)
+        if ok then m1 = r end
+    elseif not NO_MESH_BENTS[t] then
+        m1 = t                                   -- the engine's default: mesh named like the type
+    end
+    meshes[#meshes + 1] = mesh_entry(m1)
+    if mod.__get_mesh2 ~= nil then
+        local ok, r = pcall(mod.__get_mesh2)
+        if ok then meshes[#meshes + 1] = mesh_entry(r) end
+    end
+    if #meshes == 0 then return false end
+    local scale, pulse = 1.0, true
+    if mod.__get_scale ~= nil then
+        local ok, r = pcall(mod.__get_scale)
+        if ok and type(r) == "number" then scale = r end
+    end
+    if mod.__get_pulsates ~= nil then
+        local ok, r = pcall(mod.__get_pulsates)
+        if ok and r == false then pulse = false end
+    end
+    return { meshes = meshes, scale = scale, pulse = pulse }
+end
+
+local function ment_static(t, var, getter)
+    local ok, has = pcall(ga_ment_type_var_exists, t, var)
+    if not ok or has ~= true then return nil end
+    local ok2, v = pcall(getter, t, var)
+    if ok2 then return v end
+    return nil
+end
+
+local function ment_model(t)
+    local mod = rawget(_G, t)
+    if type(mod) == "table" and mod.__on_render ~= nil then return false end
+    if ment_static(t, "__hide", ga_ment_get_static_b) == true then return false end
+    local mesh = ment_static(t, "__mesh", ga_ment_get_static_s)
+    local e = mesh_entry(mesh)
+    if e == nil then return false end
+    local tex = real_tex(ment_static(t, "__tex_override", ga_ment_get_static_s))
+    if tex then e.tex = tex end
+    local r = ment_static(t, "__radius", ga_ment_get_static_f)
+    if type(r) ~= "number" or r <= 0 then r = 0.5 end
+    local ok, inv = pcall(ga_mesh_get_inv_radius, mesh)
+    if not ok or type(inv) ~= "number" then inv = 1.0 end
+    return { meshes = { e }, scale = r * inv, pulse = false }
+end
+
+-- kind "bent" | "ment"; false when it has no model we can draw
+function C.ent_model(kind, t)
+    local cache = model_cache[kind]
+    if cache == nil or type(t) ~= "string" then return false end
+    local m = cache[t]
+    if m == nil then
+        m = (kind == "bent") and bent_model(t) or ment_model(t)
+        cache[t] = m
+    end
+    return m
+end
+
+-- our picture's param -> { tex, w, h, fx, fy, ox, oy, oz } (the bent's own decode)
+local function picture_data(ps)
+    local mod = rawget(_G, PIC_BENT)
+    if type(mod) ~= "table" or type(mod.decode) ~= "function" then return nil end
+    local ok, d = pcall(mod.decode, ps)
+    if ok and type(d) == "table" and real_tex(d.tex) then return d end
+    return nil
+end
+
+-- Draws one model with the matrix at the ent's centre. alpha = number: see-
+-- through, unlit (ghost); nil: solid (menu preview). tex = a texture to use
+-- instead (a ment's saved __tex_override).
+local function draw_model(m, alpha, tex)
+    local s = m.scale
+    if m.pulse then s = s * (1.0 + math.cos(6.0 * ga_get_sys_f("time.current")) * 0.1) end
+    ga_render_matrix_scaled(s, s, s)
+    for _, e in ipairs(m.meshes) do
+        local tx = tex or e.tex
+        if alpha then ga_render_mesh_with_tex_alpha_no_lighting(e.mesh, tx, alpha)
+        else ga_render_mesh_with_tex(e.mesh, tx) end
+    end
+end
+
+local function draw_picture(d, alpha)
+    ga_render_matrix_translated(d.ox, d.oy, d.oz)
+    ga_render_matrix_frame(std.vec(d.fy, -d.fx, 0.0), std.vec(d.fx, d.fy, 0.0), std.vec(0.0, 0.0, 1.0))
+    ga_render_matrix_scaled(d.w, PIC_THICKNESS, d.h)
+    if alpha then ga_render_mesh_with_tex_alpha_no_lighting(PIC_MESH, d.tex, alpha)
+    else ga_render_mesh_with_tex_no_lighting(PIC_MESH, d.tex) end
+end
+
+-- what a schematic ent looks like: "model" (+ the model), "picture" (+ data) or nil
+local function sch_bent_look(b)
+    if b.t == PIC_BENT then
+        local d = picture_data(b.ps)
+        if d then return "picture", d end
+        return nil
+    end
+    local m = C.ent_model("bent", b.t)
+    if m then return "model", m end
+    return nil
+end
+
+-- Schematic ents at box corner (ox, oy, oz). Lines (ghost only): the cyan box /
+-- cross of every ent WITHOUT a model - call before any mesh (see area_fill).
+function C.schem_ent_lines(sch, ox, oy, oz)
+    for _, b in ipairs(sch.bents) do
+        if sch_bent_look(b) == nil then
+            draw_cells(std.bp(ox + b.x, oy + b.y, oz + b.z), 0, -0.3, CYAN, 1.5)
+        end
+    end
+    local k = 0.35
+    ga_render_color(std.vec(CYAN[1], CYAN[2], CYAN[3]))
+    for _, m in ipairs(sch.ments) do
+        if not C.ent_model("ment", m.t) then
+            local x, y, z = ox + m.x, oy + m.y, oz + m.z
+            ga_render_line_thick(std.vec(x - k, y, z), std.vec(x + k, y, z), 2.0)
+            ga_render_line_thick(std.vec(x, y - k, z), std.vec(x, y + k, z), 2.0)
+            ga_render_line_thick(std.vec(x, y, z - k), std.vec(x, y, z + k), 2.0)
+        end
+    end
+end
+
+-- Meshes of the schematic's ents. alpha: see draw_model. stand_in = true
+-- (menu: no lines there) draws a small see-through cube for ents without a model.
+function C.schem_ent_meshes(sch, ox, oy, oz, alpha, stand_in)
+    local function one(x, y, z, f)
+        ga_render_push_matrix()
+        ga_render_matrix_translated(x, y, z)
+        local ok, err = pcall(f)
+        ga_render_pop_matrix()
+        return ok, err
+    end
+    local function cube(size)
+        return function()
+            ga_render_matrix_scaled(size, size, size)
+            ga_render_mesh_with_tex_alpha_no_lighting("creative_area_box", "creative_cyan", 0.5)
+        end
+    end
+    for _, b in ipairs(sch.bents) do
+        local look, d = sch_bent_look(b)
+        local x, y, z = ox + b.x + 0.5, oy + b.y + 0.5, oz + b.z + 0.5
+        if look == "model" then
+            one(x, y, z, function() draw_model(d, alpha) end)
+        elseif look == "picture" then
+            one(x, y, z, function() draw_picture(d, alpha) end)
+        elseif stand_in then
+            one(x, y, z, cube(0.4))
+        end
+    end
+    for _, m in ipairs(sch.ments) do
+        local model = C.ent_model("ment", m.t)
+        local x, y, z = ox + m.x, oy + m.y, oz + m.z
+        if model then
+            one(x, y, z, function() draw_model(model, alpha, real_tex(m.tex)) end)
+        elseif stand_in then
+            one(x, y, z, cube(0.5))
+        end
+    end
+end
+
 -- Holding a schematic: where L-click puts it. Outline of its box (orange when
--- part of it isn't loaded), small boxes / crosses for its ents and monsters,
--- and the blocks as half see-through cubes with their own textures
--- (game_creative_schem.lua C.schem_holo). Lines first, the meshes LAST (see
--- area_fill).
+-- part of it isn't loaded), the blocks as half see-through cubes with their
+-- own textures (game_creative_schem.lua C.schem_holo) and the ents / monsters
+-- as half see-through models (a cyan box / cross for ents without a model).
+-- Lines first, the meshes LAST (see area_fill).
 local HOLO_ALPHA, HOLO_SCALE = 0.5, 0.98     -- a hair inside the cells: no flicker on block faces
+local HOLO_TINT = { 0.80, 1.0, 1.0 }         -- same light cyan as the blocks' textures
 local function holo_cube(x, y, z, tex)
     ga_render_matrix_translated(x, y, z)
     ga_render_matrix_scaled(HOLO_SCALE, HOLO_SCALE, HOLO_SCALE)
@@ -209,17 +415,7 @@ local function render_schem_preview(raw)
     local x1, y1, z1 = ox + sch.sx - 1, oy + sch.sy - 1, oz + sch.sz - 1
     local loaded = C.box_loaded(level, ox, oy, oz, x1, y1, z1)
     area_lines(ox, oy, oz, x1, y1, z1, (loaded == "all") and CYAN or ORANGE)
-    for _, b in ipairs(sch.bents) do
-        draw_cells(std.bp(ox + b.x, oy + b.y, oz + b.z), 0, -0.3, CYAN, 1.5)
-    end
-    local k = 0.35
-    ga_render_color(std.vec(CYAN[1], CYAN[2], CYAN[3]))
-    for _, m in ipairs(sch.ments) do
-        local x, y, z = ox + m.x, oy + m.y, oz + m.z
-        ga_render_line_thick(std.vec(x - k, y, z), std.vec(x + k, y, z), 2.0)
-        ga_render_line_thick(std.vec(x, y - k, z), std.vec(x, y + k, z), 2.0)
-        ga_render_line_thick(std.vec(x, y, z - k), std.vec(x, y, z + k), 2.0)
-    end
+    C.schem_ent_lines(sch, ox, oy, oz)
     local holo = C.schem_holo(sch)
     for _, g in ipairs(holo.groups) do
         ga_render_color(std.vec(g.col[1], g.col[2], g.col[3]))   -- tints the texture
@@ -230,6 +426,8 @@ local function render_schem_preview(raw)
             ga_render_pop_matrix()
         end
     end
+    ga_render_color(std.vec(HOLO_TINT[1], HOLO_TINT[2], HOLO_TINT[3]))
+    C.schem_ent_meshes(sch, ox, oy, oz, HOLO_ALPHA, false)
 end
 
 local outline_err_shown = false

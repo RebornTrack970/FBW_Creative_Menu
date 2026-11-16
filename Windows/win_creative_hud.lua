@@ -132,7 +132,7 @@ local function render_hotbar(wid)
     local area = ga_exists(C.AREA_VAR) and ga_get_s(C.AREA_VAR) or ""
     if alt and area ~= "" and kind ~= "block" then
         -- a schematic box being picked (Alt+middle-click) with any other slot
-        hint = "Box " .. area .. "   MMB/P = save as schematic   Alt+wheel = depth   release Alt = cancel"
+        hint = "Box " .. area .. "   MMB/C = save as schematic   Alt+wheel = depth   release Alt = cancel"
     elseif kind == nil then
         hint = "G = menu   V = exit build"
     elseif kind == "block" then
