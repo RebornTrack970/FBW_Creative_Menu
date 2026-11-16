@@ -133,7 +133,7 @@ local function render_chunk(wid,chunk)
                     return ga_get_sys_f("time.current")
                 end,
             })
-        elseif _G[v] and _G[v].__get_mesh then
+        elseif _G[v] then
             --Creating the classic "pulsating" look.
             local cur_time = ga_get_sys_f("time.current")--ga_get_game_time()
             local scale = 1.0 + math.cos(6.0 * cur_time) * 0.1
@@ -142,7 +142,7 @@ local function render_chunk(wid,chunk)
             ga_render_matrix_scaled(scale, scale, scale);
             --
             -- local mesh_name = "txt_not_yet_added"
-            local mesh_name = _G[v].__get_mesh()
+            local mesh_name = _G[v].__get_mesh and _G[v].__get_mesh() or v
             if mesh_name ~= "" then
                 ga_render_mesh(mesh_name)
             end
