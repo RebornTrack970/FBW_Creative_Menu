@@ -142,6 +142,9 @@ function p.__process_input(wid)
         ga_window_push("win_creative")
         return
     end
+    if S.cur_tab ~= S.last_tab then
+        C.compute_grid()
+    end
 
     if S.cur_tab ~= S.last_tab or cur_search ~= S.last_search then
         local tab_changed = (S.cur_tab ~= S.last_tab)
