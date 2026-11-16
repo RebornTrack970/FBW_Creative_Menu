@@ -28,7 +28,8 @@ A Minecraft-style creative inventory for Xar.
 [*][b]Entities[/b] - place monsters like blocks (count, lifetime, FREEZE = spawned frozen like a laser hit)
 [*][b]Interact[/b] - place keys, ammo, health, gold, shops, save points, respawn points, waypoints, and more (listed by type); [b]Text Box[/b] asks for its message (with colors); [b]Trophies[/b] opens a page with every trophy
 [*][b]Teleport[/b] - search and warp to your waypoints
-[*][b]Decor[/b] - hang pictures (sizes, facing); [b]Schematics[/b] (bottom right) lists your saved schematics. They are stored in Output/FileOut/creative_schems.txt, outside the mod folder, so you can share that file. Middle-click a schematic to save it as [b]Lua code[/b]: a block script (world node) with merged create_rect boxes, set_pos, interactables and monsters, in Output/FileOut/block_schem_<name>.lua (builds bigger than 16x16x16 are cut into one script per 16-block piece)
+[*][b]Decor[/b] - hang pictures (sizes, facing)
+[*][b]Schems[/b] - your saved schematics with a 3D preview (drag to turn it). They are stored in Output/FileOut/creative_schems.txt, outside the mod folder, so you can share that file. Middle-click a schematic to save it as [b]Lua code[/b]: a block script (world node) with merged create_rect boxes, set_pos, interactables and monsters, in Output/FileOut/block_schem_<name>.lua (builds bigger than 16x16x16 are cut into one script per 16-block piece)
 [/list]
 
 Your hotbar is saved with your game.

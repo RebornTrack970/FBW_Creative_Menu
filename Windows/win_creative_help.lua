@@ -70,21 +70,26 @@ local function tab_help()
             "PIC SIZE: S / M / L / XL, or click the % box and type a size (10-1000).",
             "SNAP (FACING) = pictures not on a wall face straight along the nearest axis.",
             "REMOVE PICS HERE = remove the pictures near the crosshair.",
-            "SCHEMATICS (bottom right) = your saved schematics.",
         }},
         [C.TAB_WORLDGEN] = { "WORLDGEN", {
-            "placeholder help."
+            "Click a block = preview the 16x16x16 chunk its Lua generator makes (blocks and interactables, no monsters).",
+            "Drag on the preview = turn it. It spins again by itself after a while.",
+            "Gizmo (bottom left): click a label = look from that side. X / Y / Z = the chunk's set_pos coordinates.",
+            "Clicking X- ... Z+ also picks that side for CUT: - / + moves its cut plane to look inside rooms. RESET = whole chunk. Another block starts uncut.",
+            "SEED: - / + or click the number and type = generate it with another seed.",
+            "ERRORED = the generator uses something the preview can't fake (mazes, caves, perlin noise). The console shows the error.",
         }}
     }
     return TAB_HELP
 end
 
--- DECOR -> SCHEMATICS page (win_creative_schem.lua)
+-- SCHEMS tab (win_creative_schem.lua)
 local SCHEM_HELP = { "SCHEMATICS", {
     "Make one in build mode: hold Alt, middle-click (or C) one corner, aim the cyan cursor (Alt+wheel = depth), middle-click again, type a name.",
     "It keeps the blocks, interactables / pictures / text boxes with their settings, monsters (HP, frozen) and trophies. It goes into your selected hotbar slot.",
-    "Holding one shows a cyan ghost: L-click places it there, Backspace undoes it.",
-    "Here: click one = put it in the hotbar. R-click twice = delete it.",
+    "Holding one shows a cyan ghost (blocks, and interactables / monsters as see-through models): L-click places it there, Backspace undoes it.",
+    "Here: point at one = 3D preview on the right. Drag on it = turn it; gizmo (bottom right): click a label = look from that side.",
+    "Click one = put it in the hotbar. R-click twice = delete it.",
     "Middle-click one = save it as Lua code: a block script (create_rect / set_pos, interactables, monsters) in Output/FileOut/block_schem_<name>.lua. Copy it into a package's WorldNodes/Nodes/. Bigger than 16x16x16 = one script per 16-block piece.",
     "Saved in Output/FileOut/creative_schems.txt (not in the mod folder, so uploading the mod never uploads them). RELOAD FILE reads it again, e.g. after copying in someone else's file.",
 }}
@@ -207,7 +212,7 @@ function C.render_help(wid)
     ga_win_quad_color(wid, mid - 0.0008, PANEL_Y0 + 0.05, mid + 0.0008, PANEL_Y1 - 0.02, std.vec(0.20, 0.20, 0.28))
 
     local th = tab_help()[S.cur_tab] or { "MENU", {} }
-    if S.cur_tab == C.TAB_DECOR and C.dp ~= nil and C.dp.sub == "schems" then th = SCHEM_HELP end
+    if S.cur_tab == C.TAB_SCHEMS then th = SCHEM_HELP end
     section(wid, PANEL_X0 + 0.02, top, mid - PANEL_X0 - 0.04, th[1] .. " TAB", th[2])
 
     local y = section(wid, mid + 0.02, top, PANEL_X1 - mid - 0.04, "MENU", MENU_HELP)

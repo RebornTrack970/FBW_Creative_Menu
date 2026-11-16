@@ -15,6 +15,7 @@ local TABS = {
     { label = "INTERACT", icon = "buy_station" },
     { label = "TELEPORT", icon = "bent_bookmark" },
     { label = "DECOR",    icon = "picture_old_house" },
+    { label = "SCHEMS",   icon = "creative_schem" },
     { label = "WORLDGEN", icon = "blocktex_default" },
 }
 -- bottom bar: close button sits centred above the key-hint line
@@ -152,7 +153,6 @@ function p.__process_input(wid)
         -- going to another tab closes INTERACT's trophy page (reopening the
         -- menu on INTERACT keeps it)
         if tab_changed and S.cur_tab ~= C.TAB_INTERACT then C.tp.sub = nil end
-        if tab_changed and S.cur_tab ~= C.TAB_DECOR then C.dp.sub = nil end   -- same for SCHEMATICS
         S.last_tab = S.cur_tab
         S.last_search = cur_search
         C.rebuild(wid)                -- resets page to 0
@@ -232,12 +232,11 @@ function p.__render(wid)
         C.render_control_strip_interact(wid)
     elseif S.cur_tab == C.TAB_TELEPORT then
         C.render_teleport_tab(wid)
-    elseif S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" then
-        C.render_grid_tab(wid, "schem")
-        C.render_schem_strip(wid)
     elseif S.cur_tab == C.TAB_DECOR then
         C.render_grid_tab(wid, "decor")
         C.render_control_strip_decor(wid)
+    elseif S.cur_tab == C.TAB_SCHEMS then
+        C.render_schem_tab(wid)
     elseif S.cur_tab == C.TAB_WORLDGEN then
         C.render_worldgen_tab(wid)
     end

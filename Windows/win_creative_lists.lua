@@ -221,7 +221,7 @@ function C.rebuild(wid)
         end
         table.sort(S.items, isort.less)
 
-    elseif S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" then
+    elseif S.cur_tab == C.TAB_SCHEMS then
         C.dp.rebuild(search)                  -- win_creative_schem.lua
 
     elseif S.cur_tab == C.TAB_DECOR then
@@ -558,8 +558,6 @@ local function decor_strip_layout(cb)
     btn("snap",    0.070, "SNAP", ga_get_b(C.D_SNAP), "FACING")
     x = x + 0.020
     btn("remove",  0.190, "REMOVE PICS HERE", false, nil)
-    local o = C.dp.open                     -- bottom right: the SCHEMATICS page
-    cb("schems", o.x, o.y, o.w, o.h, "SCHEMATICS >", false, nil)
 end
 
 -- INTERACT settings strip: the hotbar's current entry when it takes an amount
@@ -650,7 +648,6 @@ local function param_strip_click(raw, cursor)
 end
 
 local function decor_strip_click(id, wid)
-    if id == "schems" then C.dp.set(wid, "schems") return false end   -- (plays its own sound)
     if string.sub(id, 1, 4) == "size" then
         local s = DECOR_SIZES[tonumber(string.sub(id, 5)) or 2]
         ga_set_i(C.D_SIZE, s and s.pct or 100)
@@ -666,7 +663,8 @@ end
 function C.grid_input(wid)
 
     if S.cur_tab == C.TAB_BLOCKS or S.cur_tab == C.TAB_ENTITIES
-       or S.cur_tab == C.TAB_INTERACT or S.cur_tab == C.TAB_TELEPORT or S.cur_tab == C.TAB_DECOR or S.cur_tab == C.TAB_WORLDGEN then
+       or S.cur_tab == C.TAB_INTERACT or S.cur_tab == C.TAB_TELEPORT or S.cur_tab == C.TAB_DECOR
+       or S.cur_tab == C.TAB_SCHEMS or S.cur_tab == C.TAB_WORLDGEN then
         local np = C.num_pages()
         if ga_win_mouse_wheel_down(wid) or ga_win_key_pressed_or_spammed(wid, "DOWN", 1.0, 0.05) then
             S.page = S.page + 1
@@ -691,7 +689,7 @@ function C.grid_input(wid)
                     choose_interactable(gi, wid)
                 elseif S.cur_tab == C.TAB_TELEPORT then
                     choose_teleport(gi)
-                elseif S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" then
+                elseif S.cur_tab == C.TAB_SCHEMS then
                     C.dp.choose(gi)
                 elseif S.cur_tab == C.TAB_DECOR then
                     choose_decor(gi)
@@ -701,12 +699,12 @@ function C.grid_input(wid)
             end
         end
 
-        -- schematics page: R-click twice = delete, middle-click = save as Lua
-        if S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" and ga_win_mouse_pressed(wid, false) then
+        -- SCHEMS: R-click twice = delete, middle-click = save as Lua
+        if S.cur_tab == C.TAB_SCHEMS and ga_win_mouse_pressed(wid, false) then
             local gi = C.hovered_index(ga_win_get_cursor_pos(wid))
             if gi >= 1 then C.dp.rclick(gi) end
         end
-        if S.cur_tab == C.TAB_DECOR and C.dp.sub == "schems" and C.mmb_pressed(wid) then
+        if S.cur_tab == C.TAB_SCHEMS and C.mmb_pressed(wid) then
             local gi = C.hovered_index(ga_win_get_cursor_pos(wid))
             if gi >= 1 then C.dp.export(gi) end
         end
@@ -832,7 +830,7 @@ function C.strip_input(wid)
             if raw ~= nil and C.AMOUNT_BENTS[raw] then amount_strip_click(raw, cursor) end
             if raw ~= nil and C.PARAM_BENTS[raw] then param_strip_click(raw, cursor) end
 
-        elseif S.cur_tab == C.TAB_DECOR and C.dp.sub ~= nil then
+        elseif S.cur_tab == C.TAB_SCHEMS then
             C.dp.strip_click(wid, cursor)
 
         elseif S.cur_tab == C.TAB_DECOR then
