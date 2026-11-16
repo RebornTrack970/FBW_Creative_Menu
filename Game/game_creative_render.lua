@@ -152,9 +152,9 @@ local function render_block_outline()
     if level == nil or level ~= vlevel then return end
     local r = alt and 0 or brush_radius()       -- area mode ignores the brush
     if tg == nil then
-        draw_cells(bp, r, 0.006, WHITE, 2.0)    -- what R-click breaks
+        draw_cells(bp, r, 0.001, WHITE, 2.0)    -- what R-click breaks
     end
-    draw_cells(bp2, r, -0.03, GREY, 1.0)        -- where L-click places
+    draw_cells(bp2, r, -0.001, GREY, 1.0)        -- where L-click places
 end
 
 local function render_nonblock_preview(kind, raw)
