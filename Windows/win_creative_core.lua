@@ -28,7 +28,8 @@ C.TAB_ENTITIES = 5
 C.TAB_INTERACT = 6
 C.TAB_TELEPORT = 7
 C.TAB_DECOR    = 8
-C.TAB_COUNT    = 8
+C.TAB_WORLDGEN = 9
+C.TAB_COUNT    = 9
 
 C.FAV_VAR   = "temp.creative.favorites"
 C.REC_VAR   = "temp.creative.recents"
@@ -103,7 +104,7 @@ S.inited       = false
 -- creates it on these tabs and reopens itself when you switch between a tab
 -- with search and one without.
 C.SEARCH_TABS = { [C.TAB_BLOCKS] = true, [C.TAB_ENTITIES] = true, [C.TAB_INTERACT] = true,
-                      [C.TAB_TELEPORT] = true, [C.TAB_DECOR] = true }
+                      [C.TAB_TELEPORT] = true, [C.TAB_DECOR] = true, [C.TAB_WORLDGEN] = true }
 S.has_search  = false   -- this window instance created the search box
 S.search_text = ""      -- kept while the menu is closed / reopened
 S.tab_pages   = {}      -- grid page per tab, kept while the menu is closed

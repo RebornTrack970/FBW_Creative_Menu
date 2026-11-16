@@ -5,3 +5,5 @@ creative_area_box            creative_cyan          large_box.obj
 
 # Pictures placed from the DECOR tab (BasicEnts/bent_creative_picture.lua)
 creative_picture             block_black            creative_picture.obj
+
+creative_block block_black block.obj

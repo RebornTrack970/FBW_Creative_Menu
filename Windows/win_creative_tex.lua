@@ -372,7 +372,9 @@ local function fuzzy_tex(base, prefix, drop)
     end
     return ""
 end
-
+local block_tex_overrides = {
+    XAR_SOLID_BORING = "block_concrete_border",
+}
 function C.block_tex(raw)
     local cached = tex_cache[raw]
     if cached ~= nil then return cached end
@@ -385,6 +387,8 @@ function C.block_tex(raw)
         elseif _G[raw] and _G[raw].__get_bt_to_copy then -- new 1.02.00 feature
             found = C.block_tex(_G[raw].__get_bt_to_copy())
         end
+    elseif block_tex_overrides[raw] then
+        found = block_tex_overrides[raw]
     else
         found = fuzzy_tex(string.lower(C.clean_name(raw)), "block_", DROP_TOKENS)
     end
@@ -553,3 +557,15 @@ function p.__on_start(wid) end
 function p.__on_end(wid) end
 function p.__render(wid) end
 function p.__process_input(wid) end
+
+function p.uncrash__info()
+    local out = uncrash.info {
+        local_funcs={
+            choice_index=choice_index,
+            title_case=title_case,
+            --more!!!
+        }
+    }
+    choice_index=out.choice_index
+    title_case=out.title_case
+end

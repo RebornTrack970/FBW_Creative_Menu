@@ -92,9 +92,7 @@ end
 -- ga_win_mouse_pressed(wid, left) passes 1 / 2). Not SDL's 1 / 2 / 3.
 local MOUSE_MIDDLE = 3
 function C.mmb_pressed(wid)
-    if ga_win_mouse_pressed2 == nil then return false end
-    local ok, r = pcall(ga_win_mouse_pressed2, wid, MOUSE_MIDDLE)
-    return ok and r == true
+    return ga_win_mouse_pressed2(wid, MOUSE_MIDDLE) or ga_win_key_pressed(wid, "C")
 end
 
 -- middle-click: save it as a Lua block script (Output/FileOut/block_schem_<name>.lua)

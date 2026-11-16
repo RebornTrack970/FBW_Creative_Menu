@@ -15,6 +15,7 @@ local TABS = {
     { label = "INTERACT", icon = "buy_station" },
     { label = "TELEPORT", icon = "bent_bookmark" },
     { label = "DECOR",    icon = "picture_old_house" },
+    { label = "WORLDGEN", icon = "blocktex_default" },
 }
 -- bottom bar: close button sits centred above the key-hint line
 local CLOSE_Y, CLOSE_CW, CLOSE_TXT = 0.040, 0.011, "Close (ESC)"
@@ -141,6 +142,9 @@ function p.__process_input(wid)
         ga_window_push("win_creative")
         return
     end
+    if S.cur_tab ~= S.last_tab then
+        C.compute_grid()
+    end
 
     if S.cur_tab ~= S.last_tab or cur_search ~= S.last_search then
         local tab_changed = (S.cur_tab ~= S.last_tab)
@@ -234,6 +238,8 @@ function p.__render(wid)
     elseif S.cur_tab == C.TAB_DECOR then
         C.render_grid_tab(wid, "decor")
         C.render_control_strip_decor(wid)
+    elseif S.cur_tab == C.TAB_WORLDGEN then
+        C.render_worldgen_tab(wid)
     end
 
     C.render_help(wid)          -- over the tab (when open)
@@ -284,15 +290,10 @@ end
 function p.uncrash__info()
     local out = uncrash.info {
         local_funcs={
-            compute_grid=C.compute_grid,
-            clean_name=C.clean_name,
-            clean_ent_name=C.clean_ent_name,
-            category_of=C.category_of,
-            -- more!!!
+            tab_rect=tab_rect,
+            on_tab=on_tab,
         }
     }
-    C.compute_grid=out.compute_grid
-    C.clean_name=out.clean_name
-    C.clean_ent_name=out.clean_ent_name
-    C.category_of=out.category_of
+    tab_rect=out.tab_rect
+    on_tab=out.on_tab
 end

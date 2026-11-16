@@ -72,6 +72,9 @@ local function tab_help()
             "REMOVE PICS HERE = remove the pictures near the crosshair.",
             "SCHEMATICS (bottom right) = your saved schematics.",
         }},
+        [C.TAB_WORLDGEN] = { "WORLDGEN", {
+            "placeholder help."
+        }}
     }
     return TAB_HELP
 end

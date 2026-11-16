@@ -152,9 +152,9 @@ local function render_block_outline()
     if level == nil or level ~= vlevel then return end
     local r = alt and 0 or brush_radius()       -- area mode ignores the brush
     if tg == nil then
-        draw_cells(bp, r, 0.006, WHITE, 2.0)    -- what R-click breaks
+        draw_cells(bp, r, 0.001, WHITE, 2.0)    -- what R-click breaks
     end
-    draw_cells(bp2, r, -0.03, GREY, 1.0)        -- where L-click places
+    draw_cells(bp2, r, -0.001, GREY, 1.0)        -- where L-click places
 end
 
 local function render_nonblock_preview(kind, raw)
@@ -180,8 +180,8 @@ local function render_nonblock_preview(kind, raw)
             end)
             if ok and type(sr) == "number" then r = sr end
         end
-        if r < 0.2 then r = 0.2 end
-        if r > 4.0 then r = 4.0 end
+        --if r < 0.2 then r = 0.2 end
+        --if r > 4.0 then r = 4.0 end
         draw_box(pos.x - r, pos.y - r, pos.z - r, pos.x + r, pos.y + r, pos.z + r, WHITE, 1.5)
         local k = 0.15   -- small cross marking the exact point
         ga_render_line_thick(std.vec(pos.x - k, pos.y, pos.z), std.vec(pos.x + k, pos.y, pos.z), 2.0)

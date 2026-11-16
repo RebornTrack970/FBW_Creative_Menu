@@ -379,3 +379,38 @@ function p.__render(wid)
     ga_win_txt(wid, PRE_X0, PRE_Y1 + 0.014, "PREVIEW (how the text box shows it):")
     render_preview(wid, get_text(wid))
 end
+
+function p.uncrash__info()
+    local out = uncrash.info {
+        local_funcs={
+            edit_mode=edit_mode,
+            build_on=build_on,
+            inner=inner,
+            hit=hit,
+            swatch_rect=swatch_rect,
+            hex_col=hex_col,
+            parse=parse,
+            wrap=wrap,
+            render_preview=render_preview,
+            get_text=get_text,
+            set_text=set_text,
+            start=start,
+            finish=finish,
+            close=close
+        }
+    }
+    edit_mode=out.edit_mode
+    build_on=out.build_on
+    inner=out.inner
+    hit=out.hit
+    swatch_rect=out.swatch_rect
+    hex_col=out.hex_col
+    parse=out.parse
+    wrap=out.wrap
+    render_preview=out.render_preview
+    get_text=out.get_text
+    set_text=out.set_text
+    start=out.start
+    finish=out.finish
+    close=out.close
+end
