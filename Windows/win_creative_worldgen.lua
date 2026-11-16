@@ -71,6 +71,12 @@ local function do_worldgen(func)
         block_set_s = function()end,
         randi = ga_randi,
         randf = ga_randf,
+        get_input_path_length = function()
+            return 0
+        end,
+        get_input_path_bt = function()
+            return "block_e"
+        end,
     })
     if not worked then ga_console_print("^1Error in worldgen in game lua state: " .. err) return false end
     return chunk
@@ -80,19 +86,28 @@ local yaw = 0
 local pitch = 0
 local timer = -100
 
+local goal_yaw = 0
+local goal_pitch = 0
+local goal_moving = false
+
+local cam_locked = false
+
 local last_cursor = nil
 local function render_chunk(wid,chunk)
     local cursor = ga_win_get_cursor_pos(wid)
     last_cursor = last_cursor or cursor
-    if ga_win_mouse_down(true) then
+    if ga_win_mouse_down(true) and not cam_locked then
         timer = -100
         yaw = yaw + (cursor.x-last_cursor.x)*720
         pitch = pitch + (cursor.y-last_cursor.y)*360
         if pitch > 90 then pitch = 90 end
         if pitch < -90 then pitch = -90 end
+        goal_moving = false
+    elseif not ga_win_mouse_down(true) then
+        cam_locked = false
     end
     timer = timer + 1
-    if timer > 0 then
+    if timer > 0 and not goal_moving then
         yaw = yaw - ga_get_sys_f("time.elapsed")*30
     end
     -- RAW rendering...
@@ -190,6 +205,82 @@ function C.render_worldgen_tab(wid)
         ga_render_set_depth_test_enabled(false)
     end
     C.render_grid_tab(wid,"worldgen")
+
+    ga_win_set_screen_coord_mode(wid,"screen")
+    local x = 0.1
+	local y = 0.125
+	local width = 0.05
+	local aspect = ga_get_sys_f("display.camera_params.a_ratio.value")
+
+    local yaw_rad = math.rad(yaw)
+    local pitch_rad = math.rad(math.min(math.max(-89.999,pitch),89.999))
+
+	local look = std.vec(math.sin(yaw_rad)*math.cos(pitch_rad), math.cos(yaw_rad)*math.cos(pitch_rad), math.sin(pitch_rad))
+    local left = std.normalize(std.cross(std.vec(0,0,1),look))
+	local up = std.cross(look,left)
+    local function thing(vec)
+        -- std.dot(std.vec(1,0,0),std.vec_scale(left,-1)),std.dot(std.vec(1,0,0),up),std.dot(std.vec(1,0,0),look)
+        return std.dot(vec,std.vec_scale(left,-1)),std.dot(vec,up),std.dot(vec,look)
+    end
+    local things = {}
+    local s = 0.005
+    ga_win_set_char_size(wid, s, s*2)
+    ga_win_set_back_params(wid, std.vec(0,0,0),1,1)
+	local dx,dy,z = thing(std.vec(1,0,0))
+	things[#things+1] = {"X+",dx,dy,z, 1,0,0}
+    local tx,ty = dx,dy
+    dx,dy,z = thing(std.vec(-1,0,0))
+	things[#things+1] = {"X-",dx,dy,z, -1,0,0}
+    ga_win_line(wid,x+dx*width/aspect,y+dy*width,x+tx*width/aspect,y+ty*width,std.vec(1,0,0))
+	dx,dy,z = thing(std.vec(0,1,0))
+	things[#things+1] = {"Y+",dx,dy,z, 0,1,0}
+    local tx,ty = dx,dy
+    dx,dy,z = thing(std.vec(0,-1,0))
+	things[#things+1] = {"Y-",dx,dy,z, 0,-1,0}
+    ga_win_line(wid,x+dx*width/aspect,y+dy*width,x+tx*width/aspect,y+ty*width,std.vec(0,1,0))
+	dx,dy,z = thing(std.vec(0,0,1))
+    things[#things+1] = {"Z+",dx,dy,z, 0,0,1}
+    local tx,ty = dx,dy
+	--ga_win_line(wid,x,y,x+dx*width/aspect,y+dy*width,std.vec(0,0,1))
+    --ga_win_txt_alpha_bg(wid, x+dx*width/aspect-0.005,y+dy*width-0.005, 1, "Z+")
+    dx,dy,z = thing(std.vec(0,0,-1))
+    things[#things+1] = {"Z-",dx,dy,z, 0,0,-1}
+    ga_win_line(wid,x+dx*width/aspect,y+dy*width,x+tx*width/aspect,y+ty*width,std.vec(0,0,1))
+    for b = 0,7 do
+        dx,dy,z = thing(std.vec(((b&4)>>2)*2-1,((b&2)>>1)*2-1,(b&1)*2-1))
+        local c = {[0]="-","+"}
+        things[#things+1] = {c[(b&4)>>2] .. c[(b&2)>>1] .. c[b&1],dx,dy,z, ((b&4)>>2)*2-1,((b&2)>>1)*2-1,(b&1)*2-1}
+    end
+    --ga_win_txt_alpha_bg(wid, x+dx*width/aspect-0.005,y+dy*width-0.005, 1, "Z-")
+    table.sort(things,function(a,b) return a[4] > b[4] end)
+    local potential = nil
+    for i = 1,#things do
+        local v = things[i]
+        s = 0.02/(v[4]+5)
+        ga_win_set_char_size(wid, s, s*2)
+        local X,Y = x+v[2]*width/aspect,y+v[3]*width
+        local w = s*#v[1]*0.5
+        ga_win_txt_alpha_bg(wid, X-w,Y-s, 1, v[1])
+        local c = ga_win_get_cursor_pos(wid)
+        if ga_win_mouse_pressed(wid, true) and c.x >= X-w and c.x <= X+w and c.y >= Y-s and c.y <= Y+s then
+            if potential then
+                if things[potential][4] > v[4] then potential = i end
+            else
+                potential = i
+            end
+        end
+    end
+    if potential then
+        local v = things[potential]
+        cam_locked = true
+        goal_yaw = -math.deg(math.atan2(v[5],-v[6]))
+        goal_pitch = math.deg(math.asin(-std.normalize(std.vec(v[5],v[6],v[7])).z))
+        goal_moving = true
+    end
+    if goal_moving then
+        yaw = yaw + ((goal_yaw-yaw+180)%360-180)*0.2
+        pitch = pitch + (goal_pitch-pitch)*0.2
+    end
 end
 
 -- TODO add uncrash info
