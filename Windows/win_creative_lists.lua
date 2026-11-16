@@ -253,6 +253,48 @@ function C.rebuild(wid)
                 end
             end
         end
+    elseif S.cur_tab == C.TAB_WORLDGEN then
+        local fav_set, rec_list
+        if S.view_mode == "FAV" then
+            fav_set = {}
+            for _, v in ipairs(csv_list(C.FAV_VAR)) do fav_set[v] = true end
+        elseif S.view_mode == "RECENT" then
+            rec_list = csv_list(C.REC_VAR)
+        end
+
+        local names = enum_names(ga_get_block_names_with_prefix, "block_")
+        --if #names == 0 then names = enum_names(ga_get_block_names_with_prefix, "XAR_") end
+
+        if S.view_mode == "RECENT" and rec_list then
+            for _, nm in ipairs(rec_list) do
+                local bad = block_wiki_bad_blocks[nm]
+                local match = (search == "") or string.find(string.upper(nm), search, 1, true)
+                if (not bad) and match then
+                    local c = C.clean_name(nm)
+                    local cat = C.category_of(c)
+                    S.items[#S.items + 1] = { raw = nm, label = c, cat = cat, col = C.cat_color(cat) }
+                end
+            end
+        else
+            for _, nm in ipairs(names) do
+                local bad = block_wiki_bad_blocks[nm]
+                local match = (search == "") or string.find(string.upper(nm), search, 1, true)
+                local mode_ok = true
+                if fav_set then mode_ok = (fav_set[nm] == true) end
+                if (not bad) and match and mode_ok then
+                    local c = C.clean_name(nm)
+                    local cat = C.category_of(c)
+                    S.items[#S.items + 1] = { raw = nm, label = c, cat = cat, col = C.cat_color(cat) }
+                end
+            end
+        end
+
+        if S.sort_mode == "CATEGORY" then
+            table.sort(S.items, function(a, b)
+                if a.cat ~= b.cat then return a.cat < b.cat end
+                return a.label < b.label
+            end)
+        end
     end
     S.page = 0
 end
@@ -624,7 +666,7 @@ end
 function C.grid_input(wid)
 
     if S.cur_tab == C.TAB_BLOCKS or S.cur_tab == C.TAB_ENTITIES
-       or S.cur_tab == C.TAB_INTERACT or S.cur_tab == C.TAB_TELEPORT or S.cur_tab == C.TAB_DECOR then
+       or S.cur_tab == C.TAB_INTERACT or S.cur_tab == C.TAB_TELEPORT or S.cur_tab == C.TAB_DECOR or S.cur_tab == C.TAB_WORLDGEN then
         local np = C.num_pages()
         if ga_win_mouse_wheel_down(wid) or ga_win_key_pressed_or_spammed(wid, "DOWN", 1.0, 0.05) then
             S.page = S.page + 1
@@ -653,6 +695,8 @@ function C.grid_input(wid)
                     C.dp.choose(gi)
                 elseif S.cur_tab == C.TAB_DECOR then
                     choose_decor(gi)
+                elseif S.cur_tab == C.TAB_WORLDGEN then
+                    S.worldgen_picked_block = S.items[gi]
                 end
             end
         end
@@ -1131,7 +1175,7 @@ function C.render_grid_tab(wid, mode)
             local is_hov = (gi == hov_gi)
 
             local tex = ""
-            if     mode == "block"    then tex = C.block_tex(it.raw)
+            if mode == "block" or mode == "worldgen" then tex = C.block_tex(it.raw)
             elseif mode == "entity"   then tex = C.ent_tex(it.raw)
             elseif mode == "interact" then tex = C.valid_tex(it.tex)
             elseif mode == "decor"    then tex = C.valid_tex(it.tex)

@@ -15,6 +15,7 @@ local TABS = {
     { label = "INTERACT", icon = "buy_station" },
     { label = "TELEPORT", icon = "bent_bookmark" },
     { label = "DECOR",    icon = "picture_old_house" },
+    { label = "WORLDGEN", icon = "blocktex_default" },
 }
 -- bottom bar: close button sits centred above the key-hint line
 local CLOSE_Y, CLOSE_CW, CLOSE_TXT = 0.040, 0.011, "Close (ESC)"
@@ -234,6 +235,8 @@ function p.__render(wid)
     elseif S.cur_tab == C.TAB_DECOR then
         C.render_grid_tab(wid, "decor")
         C.render_control_strip_decor(wid)
+    elseif S.cur_tab == C.TAB_WORLDGEN then
+        C.render_worldgen_tab(wid)
     end
 
     C.render_help(wid)          -- over the tab (when open)
