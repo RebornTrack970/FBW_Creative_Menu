@@ -180,8 +180,8 @@ local function render_nonblock_preview(kind, raw)
             end)
             if ok and type(sr) == "number" then r = sr end
         end
-        if r < 0.2 then r = 0.2 end
-        if r > 4.0 then r = 4.0 end
+        --if r < 0.2 then r = 0.2 end
+        --if r > 4.0 then r = 4.0 end
         draw_box(pos.x - r, pos.y - r, pos.z - r, pos.x + r, pos.y + r, pos.z + r, WHITE, 1.5)
         local k = 0.15   -- small cross marking the exact point
         ga_render_line_thick(std.vec(pos.x - k, pos.y, pos.z), std.vec(pos.x + k, pos.y, pos.z), 2.0)
