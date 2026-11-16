@@ -87,7 +87,7 @@ local function render_chunk(wid,chunk)
     if ga_win_mouse_down(true) then
         timer = -100
         yaw = yaw + (cursor.x-last_cursor.x)*720
-        pitch = pitch - (cursor.y-last_cursor.y)*360
+        pitch = pitch + (cursor.y-last_cursor.y)*360
         if pitch > 90 then pitch = 90 end
         if pitch < -90 then pitch = -90 end
     end
