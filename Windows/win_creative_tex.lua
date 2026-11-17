@@ -373,7 +373,9 @@ local function fuzzy_tex(base, prefix, drop)
     return ""
 end
 local block_tex_overrides = {
-    XAR_SOLID_BORING = "block_concrete_border",
+    XAR_SOLID_BORING = "block_concrete_border", XAR_SOLID_BORING_GREEN = "block_dark_green_border",
+    XAR_YING_TREE_INNER = "block_dark_green_border", XAR_YING_TREE_INNER_SUB1_SOLID = "block_dark_green_border", XAR_YING_TREE_INNER_SUB1_MEAT = "block_dark_green_border",
+    XAR_MYLANTIS_AIR = "", XAR_MYLANTIS_AIR_TOP = "",
 }
 function C.block_tex(raw)
     local cached = tex_cache[raw]
