@@ -712,7 +712,17 @@ function C.remove_target(tg)
         local ok, t = pcall(ga_bent_get_type, tg.level, tg.bp)
         if ok then name = t end
         if t == C.PIC_BENT then name = "picture" end
+        local path,lbph = C.get_undo_pos(tg.level,tg.bp,{})
+        local param_i = ga_bent_get_param_i(tg.level,tg.bp)
+        local param_s = ga_bent_get_param_s(tg.level,tg.bp)
+        if param_i == 0 then param_i = nil end
+        if param_s == "" then param_s = nil end
         ga_bent_remove_perm(tg.level, tg.bp)
+        local batch = {{ path = path, lbph = lbph, old = t, param_i = param_i, param_s = param_s, type = "bent" }}
+        if #batch > 0 then
+            C.undo_stack[#C.undo_stack + 1] = batch
+            while #C.undo_stack > C.UNDO_MAX do table.remove(C.undo_stack, 1) end
+        end
     elseif tg.what == "block" then
         name = "trophy"
         ga_block_change_perm(tg.level, tg.bp, C.AIR)

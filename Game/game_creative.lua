@@ -315,7 +315,13 @@ function p.handler_undo(str)
         n = n + 1
         local level = ga_chunk_id_to_level(chunk_ids[i])
         local bp = std.chunk_id_and_lbph_to_bp(chunk_ids[i], e.lbph)
-        ga_block_change_perm(level, bp, e.old)
+        if e.type == "bent" then
+            ga_bent_add(level, bp, e.old, 3600)
+            if e.param_i then ga_bent_set_param_i(level, bp, e.param_i, 3600) end
+            if e.param_s then ga_bent_set_param_s(level, bp, e.param_s, 3600) end
+        else
+            ga_block_change_perm(level, bp, e.old)
+        end
     end
     local extra = ""
     if batch.on_undo then                       -- a schematic: also take its ents away

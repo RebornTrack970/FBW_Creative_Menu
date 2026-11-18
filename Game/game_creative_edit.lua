@@ -6,6 +6,7 @@ local C, S = creative_g, creative_g.state
 
 C.undo_stack = {}
 local UNDO_MAX   = 1000
+C.UNDO_MAX = UNDO_MAX
 
 local function undo_push(batch)
     if #batch == 0 then return end
@@ -59,6 +60,7 @@ local function get_undo_pos(level, bp, cache)
 
     return minipath,lbph
 end
+C.get_undo_pos = get_undo_pos
 
 local function apply_cells(level, cells, new_name)
     local cache = {}
