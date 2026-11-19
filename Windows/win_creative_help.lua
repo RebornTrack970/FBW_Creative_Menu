@@ -21,9 +21,11 @@ local function tab_help()
     TAB_HELP = {
         [C.TAB_BLOCKS] = { "BLOCKS", {
             "Click a block = put it in the hotbar and turn build mode on.",
-            "R-click a block = add / remove it from the favourites (* FAV).",
+            "Middle-click a block = add / remove it from the favourites (* FAV) (R-click too while PREVIEW is off).",
             "VIEW: ALL / * FAV / RECENT.   SORT: A-Z or CATEGORY.",
             "BRUSH: SINGLE / CUBE / SPHERE, SIZE - / + = brush radius.",
+            "PREVIEW (bottom right, on by default): 3D preview on the right of the block under the mouse (else the selected one). R-click a block = keep showing it (cyan frame), R-click it again = follow the mouse. Clicking picks a block as usual.",
+            "It shows a chunk inside the block: Lua blocks run their generator, built-in blocks show one made by the game's own generator (a library that comes with the mod). Drag = turn, gizmo = look from a side.",
         }},
         [C.TAB_WEAPONS] = { "WEAPONS", {
             "Click a gun = equip it. Click its ammo / upgrade number to type a value.",
@@ -76,7 +78,7 @@ local function tab_help()
             "Drag on the preview = turn it. It spins again by itself after a while.",
             "Gizmo (bottom left): click a label = look from that side. X / Y / Z = the chunk's set_pos coordinates.",
             "Clicking X- ... Z+ also picks that side for CUT: - / + moves its cut plane to look inside rooms. RESET = whole chunk. Another block starts uncut.",
-            "SEED: - / + or click the number and type = generate it with another seed.",
+            "SEED (starts as the world seed): - / + or click the number and type = generate it with another seed. It also picks which of the library's results create_xar_chunk uses for built-in blocks with randomness.",
             "ERRORED = the generator uses something the preview can't fake (mazes, caves, perlin noise). The console shows the error.",
         }}
     }

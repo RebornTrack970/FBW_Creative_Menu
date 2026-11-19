@@ -659,7 +659,8 @@ local function decor_strip_click(id, wid)
     return true
 end
 
--- grid tabs: page wheel, click = pick, right click = favourite (BLOCKS)
+-- grid tabs: page wheel, click = pick; BLOCKS: right click = pin in the
+-- PREVIEW (PREVIEW off: favourite), middle click = favourite
 function C.grid_input(wid)
 
     if S.cur_tab == C.TAB_BLOCKS or S.cur_tab == C.TAB_ENTITIES
@@ -709,15 +710,21 @@ function C.grid_input(wid)
             if gi >= 1 then C.dp.export(gi) end
         end
 
+        -- BLOCKS: R-click = pin it in the PREVIEW (PREVIEW off: favourite);
+        -- middle-click = favourite
         if S.cur_tab == C.TAB_BLOCKS then
-            local ok_rclick, rclick = ga_win_mouse_pressed(wid, false)
-            if ok_rclick and rclick then
-                local cursor = ga_win_get_cursor_pos(wid)
-                local gi = C.hovered_index(cursor)
+            local rclick = ga_win_mouse_pressed(wid, false) == true
+            local mclick = C.mmb_pressed(wid)
+            if rclick or mclick then
+                local gi = C.hovered_index(ga_win_get_cursor_pos(wid))
                 if gi >= 1 and S.items[gi] then
-                    local was = fav_toggle(S.items[gi].raw)
-                    ga_hud_msg(was and ("Favorited: " .. S.items[gi].label) or ("Unfavorited: " .. S.items[gi].label), 1.5)
-                    ga_play_sound("menu_select")
+                    if rclick and S.block_preview then
+                        C.bv.pin(gi)
+                    else
+                        local was = fav_toggle(S.items[gi].raw)
+                        ga_hud_msg(was and ("Favorited: " .. S.items[gi].label) or ("Unfavorited: " .. S.items[gi].label), 1.5)
+                        ga_play_sound("menu_select")
+                    end
                 end
             end
         end
@@ -787,6 +794,8 @@ function C.strip_input(wid)
                 local s = ga_get_i(C.BR_SIZE)
                 if s < 10 then ga_set_i(C.BR_SIZE, s + 1) end
             end
+
+            if C.btn_rect(cursor, C.bv.btn.x, sy, C.bv.btn.w, sh) then C.bv.toggle() end
 
         elseif S.cur_tab == C.TAB_ENTITIES then
             local ex = 0.025
@@ -919,6 +928,8 @@ function C.render_control_strip_blocks(wid)
     ga_win_set_front_color_default(wid)
     bsx = bsx + bsw + 0.035
     C.small_btn(wid, cursor, bsx, sy, bsw, sh, "+", false)
+
+    C.small_btn(wid, cursor, C.bv.btn.x, sy, C.bv.btn.w, sh, "PREVIEW", S.block_preview)
 end
 
 function C.render_control_strip_entities(wid)
@@ -1143,7 +1154,7 @@ function C.render_grid_tab(wid, mode)
     if #S.items == 0 then
         local msg = "No matches"
         if mode == "block" and S.view_mode == "FAV" then
-            msg = "No favorites yet - right-click a block to add one"
+            msg = "No favorites yet - middle-click a block to add one"
         elseif mode == "block" and S.view_mode == "RECENT" then
             msg = "No recent blocks yet - pick one to start building"
         elseif mode == "teleport" then
@@ -1191,8 +1202,10 @@ function C.render_grid_tab(wid, mode)
             end
 
             local armed = (mode == "schem") and C.dp.del_armed(it.raw)   -- 1st R-click of a delete
-            if is_hov or is_sel or armed then
+            local pinned = (mode == "block") and C.bv.is_pinned(it.raw)   -- R-clicked into the PREVIEW
+            if is_hov or is_sel or armed or pinned then
                 local fcol = is_sel and std.vec(1.0, 0.9, 0.2) or std.vec(1.0, 1.0, 1.0)
+                if pinned then fcol = std.vec(0.30, 0.85, 0.95) end
                 if armed then fcol = std.vec(1.0, 0.25, 0.2) end
                 local t = 0.004
                 ga_win_quad_color(wid, minx, maxy - t, maxx, maxy, fcol)

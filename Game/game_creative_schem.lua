@@ -171,6 +171,7 @@ local function is_empty(name)
     empty_cache[name] = e
     return e
 end
+C.block_is_empty = is_empty      -- (the chunk library, game_creative_chunklib.lua)
 
 -- Does a block / ent type with this name exist in the loaded game? (A file can
 -- come from another mod setup or be edited by hand; unknown names are skipped.)

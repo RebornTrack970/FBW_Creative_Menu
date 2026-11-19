@@ -85,6 +85,8 @@ function C.compute_grid()
     S.CW = tile_w + C.GAPX
     S.CH = C.TILE_Y + C.GAPY
     S.COLS = math.max(1, math.floor((C.GRID_W + C.GAPX) / S.CW))
+    -- BLOCKS with PREVIEW on: the grid takes the left half (win_creative_blockview.lua)
+    if S.cur_tab == C.TAB_BLOCKS and S.block_preview then S.COLS = math.max(1, S.COLS // 2) end
     S.ROWS = math.max(1, math.floor((C.GRID_H + C.GAPY) / S.CH))
     S.PER_PAGE = S.COLS * S.ROWS
 end
@@ -112,6 +114,8 @@ S.search_text = ""      -- kept while the menu is closed / reopened
 S.tab_pages   = {}      -- grid page per tab, kept while the menu is closed
 S.use_3d_mesh  = nil
 S.ctrl_down    = false   -- Ctrl held (set every frame in __process_input)
+S.block_preview = true   -- BLOCKS: PREVIEW on (kept while the menu is closed)
+S.block_pin     = nil    -- BLOCKS: block R-clicked into the preview (nil = follow the mouse)
 
 function C.fit(label, n)
     if #label > n then return string.sub(label, 1, n - 1) .. "." end

@@ -213,6 +213,7 @@ function p.__render(wid)
     ga_win_set_front_color_default(wid)
 
     if S.cur_tab == C.TAB_BLOCKS then
+        if S.block_preview then C.bv.render(wid) end    -- right half (win_creative_blockview.lua)
         C.render_grid_tab(wid, "block")
         C.render_control_strip_blocks(wid)
     elseif S.cur_tab == C.TAB_WEAPONS then

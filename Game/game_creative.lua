@@ -310,17 +310,25 @@ function p.handler_undo(str)
         chunk_ids[i] = chunk_id
     end
     C.undo_stack[#C.undo_stack] = nil
+    local n_bents, n_taken = 0, 0
     for i = #batch, 1, -1 do
         local e = batch[i]
-        n = n + 1
         local level = ga_chunk_id_to_level(chunk_ids[i])
         local bp = std.chunk_id_and_lbph_to_bp(chunk_ids[i], e.lbph)
         if e.type == "bent" then
-            ga_bent_add(level, bp, e.old, 3600)
-            if e.param_i then ga_bent_set_param_i(level, bp, e.param_i, 3600) end
-            if e.param_s then ga_bent_set_param_s(level, bp, e.param_s, 3600) end
+            -- one basic ent per block cell: leave whatever was put there since
+            local ok, there = pcall(ga_bent_get_type, level, bp)
+            if ok and type(there) == "string" and there ~= "" then
+                n_taken = n_taken + 1
+            else
+                if e.param_i then ga_bent_add_i(level, bp, e.old, e.param_i, C.BIG_TTL)
+                else ga_bent_add(level, bp, e.old, C.BIG_TTL) end
+                if e.param_s then ga_bent_set_param_s(level, bp, e.param_s, C.BIG_TTL) end
+                n_bents = n_bents + 1
+            end
         else
             ga_block_change_perm(level, bp, e.old)
+            n = n + 1
         end
     end
     local extra = ""
@@ -332,7 +340,17 @@ function p.handler_undo(str)
             ga_console_print("creative undo error: " .. tostring(removed))
         end
     end
-    ga_hud_msg("Undo: restored " .. n .. " block(s)" .. extra, 1.5)
+    local what = {}
+    if n > 0 then what[#what + 1] = n .. " block(s)" end
+    if n_bents > 0 then what[#what + 1] = n_bents .. " interactable(s)" end
+    local msg
+    if #what == 0 and n_taken > 0 then
+        msg = "Undo: spot already taken, nothing restored"
+    else
+        msg = "Undo: restored " .. (#what > 0 and table.concat(what, ", ") or "0 block(s)")
+        if n_taken > 0 then msg = msg .. ", " .. n_taken .. " spot(s) already taken" end
+    end
+    ga_hud_msg(msg .. extra, 1.5)
 end
 
 function p.handler_wp_home(str)

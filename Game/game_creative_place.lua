@@ -710,17 +710,21 @@ function C.remove_target(tg)
         if not ok then ga_ment_remove(tg.id) end
     elseif tg.what == "bent" then
         local ok, t = pcall(ga_bent_get_type, tg.level, tg.bp)
-        if ok then name = t end
+        if not ok or type(t) ~= "string" then t = nil end  -- on failure t is the error message
+        if t ~= nil then name = t end
         if t == C.PIC_BENT then name = "picture" end
-        local path,lbph = C.get_undo_pos(tg.level,tg.bp,{})
-        local param_i = ga_bent_get_param_i(tg.level,tg.bp)
-        local param_s = ga_bent_get_param_s(tg.level,tg.bp)
-        if param_i == 0 then param_i = nil end
-        if param_s == "" then param_s = nil end
+        local entry = nil
+        if t ~= nil and t ~= "" then
+            local path, lbph = C.get_undo_pos(tg.level, tg.bp, {})
+            local ok_i, param_i = pcall(ga_bent_get_param_i, tg.level, tg.bp)
+            local ok_s, param_s = pcall(ga_bent_get_param_s, tg.level, tg.bp)
+            if not ok_i or param_i == 0 then param_i = nil end
+            if not ok_s or param_s == "" then param_s = nil end
+            entry = { path = path, lbph = lbph, old = t, param_i = param_i, param_s = param_s, type = "bent" }
+        end
         ga_bent_remove_perm(tg.level, tg.bp)
-        local batch = {{ path = path, lbph = lbph, old = t, param_i = param_i, param_s = param_s, type = "bent" }}
-        if #batch > 0 then
-            C.undo_stack[#C.undo_stack + 1] = batch
+        if entry ~= nil then
+            C.undo_stack[#C.undo_stack + 1] = { entry }
             while #C.undo_stack > C.UNDO_MAX do table.remove(C.undo_stack, 1) end
         end
     elseif tg.what == "block" then

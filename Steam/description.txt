@@ -21,7 +21,7 @@ A Minecraft-style creative inventory for Xar.
 
 [b]Tabs[/b]
 [list]
-[*][b]Blocks[/b] - every Xar block, with search, favorites, recents, and cube/sphere brushes (size 1-10). Blocks known to crash the game are hidden.
+[*][b]Blocks[/b] - every Xar block, with search, favorites, recents, and cube/sphere brushes (size 1-10). Blocks known to crash the game are hidden. PREVIEW shows a chunk inside the block under the mouse in 3D, made by the game's own generator for that block.
 [*][b]Weapons[/b] - equip any gun, max/refill/empty ammo, set upgrades; click an ammo or upgrade number to type an exact amount; unlock, equip or re-lock any weapon fire mode (or unlock every mode at once)
 [*][b]Items[/b] - gold, health, armor, shield, XP; click a number to type an exact amount; unlock or re-lock any telekinesis upgrade (or all of them at once)
 [*][b]Buffs[/b] - keys, timed powerups (5x damage, invulnerability, 5x XP), god mode, noclip, shrink-anywhere, Icarus mode on/off, Pink Path / Blue Path (hotbar items that work like using a pink or blue ring), Screenshot / Save / Respawn (hotbar items: left click takes a screenshot without the HUD / saves / respawns)

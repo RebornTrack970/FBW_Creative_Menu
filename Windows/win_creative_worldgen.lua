@@ -8,8 +8,17 @@ end
 
 local saved_chunk = C.BLANK_CHUNK()
 local saved_chunk_bt = ""
-local path = "EMPTY_PATH"
-local saved_seed = ga_path_to_seed(path)
+local saved_seed = nil       -- the SEED box; starts as the world seed (set when the tab first draws)
+
+-- the world seed (game side, Game/game_creative_chunklib.lua C.world_seed)
+function C.world_seed()
+    local g = rawget(_G, "creative_g")
+    if type(g) == "table" and type(g.world_seed) == "function" then
+        local ok, v = pcall(g.world_seed)
+        if ok and type(v) == "number" then return v end
+    end
+    return 0
+end
 local saved_dirty = false
 local has_error = false
 
@@ -73,7 +82,7 @@ local function in_chunk(x, y, z)
     return x >= 0 and x <= 15 and y >= 0 and y <= 15 and z >= 0 and z <= 15
 end
 
-local function make_gen_api(chunk, real_std)
+local function make_gen_api(chunk, real_std, seed, bt)
     local function fix(bt)
         if type(bt) ~= "string" then return "block_e" end
         if bt:sub(1,4) ~= "XAR_" and bt:sub(1,6) ~= "block_" then return "block_" .. bt end
@@ -144,6 +153,26 @@ local function make_gen_api(chunk, real_std)
     end
     function api.bt_get_is_solid_physically(bt) return false end
 
+    -- create_xar_chunk("XAR_FOO"): in the game, the chunk becomes what the
+    -- built-in block XAR_FOO's compiled generator makes. Here: that type's
+    -- chunk library sample (Game/game_creative_chunklib.lua) - exactly the
+    -- game's result for generators without randomness; for the others the
+    -- SEED picks one of the library's results. The Lua code can go on
+    -- changing blocks after it.
+    function api.create_xar_chunk(bt)
+        if type(bt) ~= "string" or bt:sub(1, 4) ~= "XAR_" then
+            error('create_xar_chunk: the block type must start with "XAR_", got ' .. tostring(bt))
+        end
+        local g = rawget(_G, "creative_g")
+        local lib = (type(g) == "table" and type(g.clib_chunk) == "function") and g.clib_chunk(bt, seed) or nil
+        if lib == nil then error("create_xar_chunk: no chunk library entry for " .. bt) end
+        chunk.def = lib.def
+        chunk.blocks = {}
+        for i, name in pairs(lib.blocks) do chunk.blocks[i] = name end   -- (a copy: the Lua code may change it)
+        chunk.bents = {}
+        for _, e in ipairs(lib.lib_ents or {}) do chunk.bents[e.x*256+e.y*16+e.z] = e.t end
+    end
+
     -- interactables (drawn); monsters, env rects and vars are ignored
     local function bent(x, y, z, name)
         if in_chunk(x, y, z) then chunk.bents[x*256+y*16+z] = name end
@@ -169,7 +198,7 @@ local function make_gen_api(chunk, real_std)
     for _, n in ipairs({ "seed_normal", "seed_nearby", "seed_xy", "seed_xz", "seed_yz",
                          "seed_normal_chop", "seed_nearby_chop", "seed_xy_chop", "seed_xz_chop",
                          "seed_yz_chop", "seed_from_last_of_type", "get_world_seed" }) do
-        api[n] = function() return saved_seed end
+        api[n] = function() return seed end
     end
 
     -- where the chunk is: the preview has no parent chunks
@@ -178,7 +207,7 @@ local function make_gen_api(chunk, real_std)
     -- path = positions 0..len-1, bts = block types 0..len (len = this block)
     function api.get_input_path() return {} end
     function api.get_input_path_bt() return "block_e" end
-    function api.get_input_path_bts() return { [0] = { name = saved_chunk_bt } } end
+    function api.get_input_path_bts() return { [0] = { name = bt } } end
     function api.get_input_adj_bt() return "block_e" end
     function api.get_input_parent_adj_bt() return "block_e" end
     function api.get_input_path_block_var_exists() return false end
@@ -280,13 +309,38 @@ local function make_gen_api(chunk, real_std)
     return api
 end
 
-local function do_worldgen(func)
+-- does block type bt have a Lua chunk generator (its module's __main)? The
+-- built-in XAR_* blocks are made by FBW.exe itself: nothing to run for them.
+local function block_module(bt)
+    if type(bt) ~= "string" or bt == "" then return nil end
+    local ok, m = pcall(function() return _G[bt] end)
+    if ok and type(m) == "table" then return m end
+    return nil
+end
+function C.wg_has_gen(bt)
+    local m = block_module(bt)
+    return m ~= nil and type(m.__main) == "function"
+end
+
+-- Runs bt's generator with the stand-ins above. Returns the chunk table, or
+-- nil (+ the error, also printed) when it errored. Also used by the BLOCKS
+-- tab's PREVIEW (win_creative_blockview.lua).
+function C.wg_generate(bt, seed)
     local chunk = C.BLANK_CHUNK()
-    rng_seed(saved_seed)
-    local worked,err = p.wrap_func_call(func, {}, make_gen_api(chunk, std))
-    if not worked then ga_console_print("^1Error in worldgen in game lua state: " .. tostring(err)) return false end
+    local m = block_module(bt)
+    local func = m and m.__main or nil
+    rng_seed(seed)
+    local worked,err = p.wrap_func_call(func, {}, make_gen_api(chunk, std, seed, bt))
+    if not worked then ga_console_print("^1Error in worldgen in game lua state: " .. tostring(err)) return nil, err end
     return chunk
 end
+
+-- sub = { x1, y1, z1, x2, y2, z2 }: the part of the chunk that is drawn
+local function sub_is_full(sub)
+    return sub[1] == 0 and sub[2] == 0 and sub[3] == 0
+       and sub[4] == 15 and sub[5] == 15 and sub[6] == 15
+end
+C.WG_FULL = { 0, 0, 0, 15, 15, 15 }
 
 local cam = nil                          -- C.cam_new() (win_creative_view3d.lua), made on first use
 local GIZMO_X, GIZMO_Y = 0.1, 0.125
@@ -304,8 +358,7 @@ local function reset_cut()
 end
 
 local function cut_is_full()
-    return subsection[1] == 0 and subsection[2] == 0 and subsection[3] == 0
-       and subsection[4] == 15 and subsection[5] == 15 and subsection[6] == 15
+    return sub_is_full(subsection)
 end
 
 -- a drag only starts on the preview: right of the grid, above the SEED / CUT
@@ -316,11 +369,24 @@ local function on_preview(cursor)
     return cursor.x > gx1 and cursor.x < 0.99 and cursor.y > 0.26 and cursor.y < 0.80
 end
 
-local function render_chunk(wid,chunk)
+-- flat colour per block type (like the schematic ghost's)
+local function type_col(name)
+    local h = 0
+    for i = 1, #name do h = (h * 31 + string.byte(name, i)) % 100003 end
+    return std.vec(0.30 + (h % 60) / 100, 0.30 + (math.floor(h / 7) % 60) / 100, 0.30 + (math.floor(h / 53) % 60) / 100)
+end
+
+-- Draws a generated chunk (current matrix = the preview's centre) turned by
+-- view_cam, only the part inside sub. Also used by win_creative_blockview.lua.
+-- solid_unknown = every block in chunk.blocks is something you'd see (the
+-- chunk copies: air is already left out), so blocks without a known texture
+-- are drawn white with a colour per type instead of not at all, and only
+-- texture names the game really has are used.
+function C.wg_render_chunk(view_cam, chunk, sub, solid_unknown)
     -- RAW rendering...
-    C.cam_apply(cam, 16, 16, 16)
+    C.cam_apply(view_cam, 16, 16, 16)
     ga_render_set_depth_test_enabled(false)
-    if cut_is_full() then
+    if sub_is_full(sub) then
         ga_render_push_matrix()
         ga_render_matrix_scaled(16,16,16)
         ga_render_mesh_with_tex_alpha_no_lighting("creative_block","creative_white",0.1)
@@ -331,16 +397,25 @@ local function render_chunk(wid,chunk)
         ga_render_mesh_with_tex_alpha_no_lighting("creative_block","creative_white",0.051)
         ga_render_pop_matrix()
         ga_render_push_matrix()
-        ga_render_matrix_translated(subsection[1],subsection[2],subsection[3])
-        ga_render_matrix_scaled(subsection[4]-subsection[1]+1,subsection[5]-subsection[2]+1,subsection[6]-subsection[3]+1)
+        ga_render_matrix_translated(sub[1],sub[2],sub[3])
+        ga_render_matrix_scaled(sub[4]-sub[1]+1,sub[5]-sub[2]+1,sub[6]-sub[3]+1)
         ga_render_mesh_with_tex_alpha_no_lighting("creative_block","creative_white",0.051)
         ga_render_pop_matrix()
     end
     ga_render_set_depth_test_enabled(true)
-    local tex_cache = {}
+    local tex_cache, tint = {}, {}
     local function btex(bt)
         if tex_cache[bt] then return tex_cache[bt] end
         local tex = C.block_tex(bt)
+        if solid_unknown and bt ~= chunk.def then
+            local real = (tex ~= "") and C.ntex(tex) or nil
+            if real then
+                tex = real
+            else
+                tex = "creative_white"
+                tint[bt] = type_col(bt)
+            end
+        end
         tex_cache[bt] = tex
         return tex
     end
@@ -349,7 +424,7 @@ local function render_chunk(wid,chunk)
         return tex and tex ~= ""
     end
     local function solidp(x,y,z)
-        if not (x >= subsection[1] and y >= subsection[2] and z >= subsection[3] and x <= subsection[4] and y <= subsection[5] and z <= subsection[6]) then return false end
+        if not (x >= sub[1] and y >= sub[2] and z >= sub[3] and x <= sub[4] and y <= sub[5] and z <= sub[6]) then return false end
         return solid(chunk.blocks[x*256+y*16+z] or chunk.def)
     end
     for x = 0,15 do
@@ -357,56 +432,54 @@ local function render_chunk(wid,chunk)
             for z = 0,15 do
                 local bt = chunk.blocks[x*256+y*16+z] or chunk.def
                 local tex = btex(bt)
-                if tex and tex ~= "" and x >= subsection[1] and y >= subsection[2] and z >= subsection[3] and x <= subsection[4] and y <= subsection[5] and z <= subsection[6] and
+                if tex and tex ~= "" and x >= sub[1] and y >= sub[2] and z >= sub[3] and x <= sub[4] and y <= sub[5] and z <= sub[6] and
                     not (solidp(x+1,y,z) and solidp(x-1,y,z) and solidp(x,y+1,z) and solidp(x,y-1,z) and solidp(x,y,z+1) and solidp(x,y,z-1))
                     then
                     ga_render_push_matrix()
                     ga_render_matrix_translated(x,y,z)
+                    if tint[bt] then ga_render_color(tint[bt]) end
                     ga_render_mesh_with_tex("creative_block",tex)
+                    if tint[bt] then ga_render_color(std.vec(1.0, 1.0, 1.0)) end
                     ga_render_pop_matrix()
                 end
             end
         end
     end
+    -- Interactables. Types that draw themselves (__on_render) are asked to;
+    -- the rest get the schematic preview's models (Game/game_creative_render.lua
+    -- C.schem_ent_meshes): their mesh (__get_mesh / __get_mesh2, else the one
+    -- named like the type) WITH the mesh's own texture, scale and pulse - what
+    -- the engine draws - and only meshes the game surely has (an unknown mesh
+    -- name quits the game); a small see-through cube for types without one.
+    local models = {}
     for i,v in pairs(chunk.bents) do
-        ga_render_push_matrix()
         local bp = std.vec(i//256,i//16%16,i%16)
-        ga_render_matrix_translated(bp.x+0.5,bp.y+0.5,bp.z+0.5)
         local x,y,z = bp.x,bp.y,bp.z
-        if x >= subsection[1] and y >= subsection[2] and z >= subsection[3] and x <= subsection[4] and y <= subsection[5] and z <= subsection[6] then
+        if x >= sub[1] and y >= sub[2] and z >= sub[3] and x <= sub[4] and y <= sub[5] and z <= sub[6] then
             if _G[v] and _G[v].__on_render then
+                ga_render_push_matrix()
+                ga_render_matrix_translated(bp.x+0.5,bp.y+0.5,bp.z+0.5)
                 p.wrap_func_call(_G[v].__on_render,{0,bp},{
                     ga_get_game_time = function()
                         return ga_get_sys_f("time.current")
                     end,
                 })
-            elseif _G[v] then
-                --Creating the classic "pulsating" look.
-                local cur_time = ga_get_sys_f("time.current")--ga_get_game_time()
-                local scale = 1.0 + math.cos(6.0 * cur_time) * 0.1
-                if _G[v].__get_pulsates and not _G[v].__get_pulsates() then scale = 1.0 end
-                if _G[v].__get_scale then scale = scale * _G[v].__get_scale() end
-                ga_render_matrix_scaled(scale, scale, scale);
-                --
-                -- local mesh_name = "txt_not_yet_added"
-                local mesh_name = _G[v].__get_mesh and _G[v].__get_mesh() or v
-                if mesh_name ~= "" then
-                    ga_render_mesh(mesh_name)
-                end
-                if _G[v].__get_mesh2 then
-                    mesh_name = _G[v].__get_mesh2()
-                    if mesh_name ~= "" then
-                        ga_render_mesh(mesh_name)
-                    end
-                end
+                ga_render_pop_matrix()
+            else
+                models[#models + 1] = { x = x, y = y, z = z, t = v, pi = 0, ps = "" }
             end
         end
-        ga_render_pop_matrix()
+    end
+    local g = rawget(_G, "creative_g")
+    if #models > 0 and type(g) == "table" and type(g.schem_ent_meshes) == "function" then
+        ga_render_color(std.vec(1.0, 1.0, 1.0))
+        g.schem_ent_meshes({ bents = models, ments = {} }, 0, 0, 0, nil, true)
     end
 end
 
 function C.render_worldgen_tab(wid)
     local cursor = ga_win_get_cursor_pos(wid)
+    if saved_seed == nil then saved_seed = C.world_seed() end
     if S.worldgen_picked_block then
         saved_chunk_bt = S.worldgen_picked_block.raw
         saved_dirty = true
@@ -414,8 +487,8 @@ function C.render_worldgen_tab(wid)
         reset_cut()                              -- a new block starts uncut
     end
     if saved_dirty then
-        local out = do_worldgen(_G[saved_chunk_bt] and _G[saved_chunk_bt].__main)
-        if out == false then
+        local out = C.wg_generate(saved_chunk_bt, saved_seed)
+        if out == nil then
             has_error = true
         else
             has_error = false
@@ -439,7 +512,7 @@ function C.render_worldgen_tab(wid)
         ga_render_set_depth_test_enabled(true)
         ga_render_push_matrix()
         ga_render_matrix_translated(0.75,0.45,0)
-        render_chunk(wid,saved_chunk)
+        C.wg_render_chunk(cam, saved_chunk, subsection)
         ga_render_pop_matrix()
         ga_render_set_depth_test_enabled(false)
     end
